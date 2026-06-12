@@ -1,0 +1,90 @@
+# Development Compose file — plan 3.8.2 (HTTP only; TLS added in T-6.1)
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d        # start
+#   docker compose -f docker-compose.dev.yml logs -f      # follow logs
+#   docker compose -f docker-compose.dev.yml down -v      # stop + remove volumes
+#
+# All secrets use safe defaults for local development.
+# Override any value with a .env file in this directory (already gitignored).
+#
+# Networks (plan 3.8.2 — web never reaches mysql directly):
+#   frontend: web ←→ api
+#   backend:  api ←→ mysql
+
+services:
+
+  # ── MySQL 8 ─────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_root_password}
+      MYSQL_DATABASE:      ${MYSQL_DATABASE:-conciliador_dev}
+      MYSQL_USER:          ${MYSQL_USER:-conciliador}
+      MYSQL_PASSWORD:      ${MYSQL_PASSWORD:-dev_password}
+    # utf8mb4 global charset and collation — plan 3.6
+    # utf8mb4_0900_ai_ci: default for data; utf8mb4_bin on cross-join cols is
+    # set at column level in migrations (T-1.6/T-1.7).
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --default-time-zone=+00:00
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      # mysqladmin ping sends COM_PING — no auth needed, pure connectivity probe
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+      start_period: 60s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── FastAPI + Uvicorn ────────────────────────────────────────────────────────
+  api:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+      # Tag locally so docker compose doesn't pull on every up
+      target: runtime
+    environment:
+      APP_ENV:      development
+      DEBUG:        "true"
+      DATABASE_URL: "mysql+aiomysql://${MYSQL_USER:-conciliador}:${MYSQL_PASSWORD:-dev_password}@mysql:3306/${MYSQL_DATABASE:-conciliador_dev}"
+    # api may only start once MySQL is accepting connections (healthcheck green)
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+  # ── React SPA (nginx) ────────────────────────────────────────────────────────
+  web:
+    build:
+      context:    ./frontend
+      dockerfile: Dockerfile
+      target: runtime
+    ports:
+      # Only port exposed to the host — all API traffic flows through nginx proxy
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - api
+    networks:
+      - frontend
+    restart: unless-stopped
+
+# ── Persistent volumes ──────────────────────────────────────────────────────
+volumes:
+  dbdata:
+    driver: local
+
+# ── Internal networks ───────────────────────────────────────────────────────
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge

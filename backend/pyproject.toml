@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marketplace-conciliator-api"
+version = "0.1.0"
+description = "Backend API for the marketplace publication error conciliator."
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.15",
+    "fastapi[standard]>=0.136",
+    "pydantic-settings>=2.14",
+    "pymysql>=1.1",
+    "sqlalchemy[asyncio]>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "anyio>=4.13",
+    "httpx2>=2.4",
+    "import-linter>=2.11",
+    "mypy>=1.15",
+    "openpyxl>=3.1",
+    "pre-commit>=4",
+    "pytest>=9",
+    "pytest-anyio>=0.0",
+    "pytest-bdd>=8.1",
+    "pytest-cov>=7",
+    "pytest-custom-exit-code>=0.3",
+    "ruff>=0.11",
+    "testcontainers[mysql]>=4.9",
+    "types-openpyxl>=3.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D100",
+    "D103",
+    "D104",
+    "D203",
+    "D213",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "TC002", "TC003"]
+"alembic/**/*.py" = ["INP001", "UP035", "TC003"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+files = ["src", "tests"]
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers --suppress-no-test-exit-code"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+# Fail the build if overall coverage drops below 80 % (global DoD).
+fail_under = 80
+# Hexagonal boundary stubs — only __all__ defined here; implemented in M2-M5.
+omit = [
+    "*/marketplace_conciliator/auth/__init__.py",
+    "*/marketplace_conciliator/ingestion/__init__.py",
+    "*/marketplace_conciliator/mapping/__init__.py",
+    "*/marketplace_conciliator/reconciliation/__init__.py",
+    "*/marketplace_conciliator/reporting/__init__.py",
+]
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*"]
+ignore_missing_imports = true

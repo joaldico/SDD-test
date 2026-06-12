@@ -1,0 +1,42 @@
+# Files excluded from the Docker build context for the API image.
+# Keeping the context small speeds up transfers to the daemon.
+
+# Virtual environment (large, never needed in image)
+.venv/
+
+# Python byte-code and caches
+__pycache__/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Test suite and fixtures (not part of the production image)
+tests/
+
+# Dev/CI tooling configuration
+.importlinter
+.pre-commit-config.yaml
+
+# Documentation and specification
+*.md
+.specify/
+
+# Build artefacts (produced by the builder stage inside Docker, not the host)
+*.egg-info/
+dist/
+build/
+
+# Environment secrets (never bake into image)
+.env
+.env.*
+
+# Version control
+.git/
+.gitignore
+
+# Coverage reports
+.coverage
+htmlcov/

@@ -1,0 +1,33 @@
+repos:
+  - repo: local
+    hooks:
+      - id: backend-ruff
+        name: backend ruff
+        entry: bash -c 'cd backend && .venv/bin/ruff check .'
+        language: system
+        pass_filenames: false
+      - id: backend-mypy
+        name: backend mypy strict
+        entry: bash -c 'cd backend && .venv/bin/mypy'
+        language: system
+        pass_filenames: false
+      - id: backend-pytest
+        name: backend pytest
+        entry: bash -c 'cd backend && .venv/bin/pytest'
+        language: system
+        pass_filenames: false
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        pass_filenames: false
+      - id: frontend-typecheck
+        name: frontend typecheck
+        entry: bash -c 'cd frontend && npm run typecheck'
+        language: system
+        pass_filenames: false
+      - id: frontend-vitest
+        name: frontend vitest
+        entry: bash -c 'cd frontend && npm test'
+        language: system
+        pass_filenames: false

@@ -1,7 +1,7 @@
 # 3. Plan Técnico y Diseño de Arquitectura (Plan) — Módulo 1: Conciliador de Errores de Publicación Marketplace
 
 > **Fase SDD:** `3/4 — Technical Plan`
-> **Estado:** `🟡 En revisión — pendiente de aprobación`
+> **Estado:** `🟢 Aprobado sin cambios (2026-06-12)`
 > **Versión:** `1.0.0`
 > **Última actualización:** 2026-06-12
 > **Trazabilidad:** implementa [`2_spec.md`](./2_spec.md) v1.1.0 (🟢 Aprobado 2026-06-12), que deriva de [`1_intent.md`](./1_intent.md) v1.2.0 (🟢 Aprobado)
@@ -498,6 +498,6 @@ No aplica en este módulo (sin LLM/RAG/voz). La sección queda como punto de ext
 - [x] Modelo físico MySQL con `utf8mb4` global, `utf8mb4_bin` en claves de cruce e índices justificados por las vistas del informe.
 - [x] Contratos API definidos, incluido el contrato detallado del endpoint de previsualización para el mapeo.
 - [x] Cada RNF de `2_spec.md` tiene respuesta arquitectónica explícita (3.1).
-- [ ] **Aprobación del solicitante** (requisito para iniciar `4_tasks.md`).
+- [x] **Aprobación del solicitante sin cambios** (2026-06-12).
 
-> **Siguiente fase (bloqueada hasta aprobación):** [`4_tasks.md`](./4_tasks.md) — Desglose en hitos y tareas trazables, matriz Spec → Plan → Tasks y plan de verificación.
+> **Siguiente fase:** [`4_tasks.md`](./4_tasks.md) — Desglose en hitos y tareas trazables, matriz Spec → Plan → Tasks y plan de verificación.

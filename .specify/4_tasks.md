@@ -1,9 +1,9 @@
 # 4. Desglose de Tareas (Tasks) — Módulo 1: Conciliador de Errores de Publicación Marketplace
 
 > **Fase SDD:** `4/4 — Task Breakdown`
-> **Estado:** `🟢 Aprobado (2026-06-12)`
-> **Versión:** `1.0.0`
-> **Última actualización:** 2026-06-12
+> **Estado:** `🔵 En ejecución — Hito M3 cerrado (2026-06-15)`
+> **Versión:** `1.1.0`
+> **Última actualización:** 2026-06-15
 > **Trazabilidad:** ejecuta [`3_plan.md`](./3_plan.md) v1.0.0 (🟢 Aprobado), verifica contra [`2_spec.md`](./2_spec.md) v1.1.0 (🟢 Aprobado)
 > **Rol de autoría:** Technical Lead / Scrum Master
 > **Uso previsto:** backlog para sesiones cortas de programación asistida por agente. Cada tarea está dimensionada para completarse (con sus tests) en una sesión. **Las tareas se ejecutan en orden estricto dentro de cada hito**; las dependencias entre hitos están explícitas.
@@ -46,47 +46,47 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 
 ### M1 — Fundaciones e Infraestructura
 
-| ID | Tarea | Traza a | Dep. | Est. | DoD específico (además del global) |
-|---|---|---|---|---|---|
-| T-1.1 | Monorepo `backend/` + `frontend/` con tooling completo: ruff, mypy --strict, pytest, pytest-bdd; eslint, tsc, vitest; lockfiles; pre-commit | ADR-001 | — | M | `pytest` y `vitest` corren (0 tests) sin error; lint/type-check en verde sobre esqueleto vacío |
-| T-1.2 | Fixtures canónicos: anonimizar los 3 ficheros reales y colocarlos en `tests/fixtures/` con un README de su estructura (incluye casos `03763BAR`, `K2.65`, fila ejemplo `ABC123`, bloque por-SKU en fila 572, NBSP) | spec 2.2 | T-1.1 | S | Test trivial que abre los 3 fixtures y verifica conteos de filas conocidos (1232 / 4156 / 8173) |
-| T-1.3 | Esqueleto FastAPI hexagonal: paquetes `auth`, `ingestion`, `mapping`, `reconciliation`, `reporting`, `platform`; endpoint `/api/v1/health`; settings 12-factor | ADR-001, plan 3.7 | T-1.1 | M | Test de integración: `GET /health` → 200 `{status, db}`; lint de arquitectura (import-linter) configurado y en verde |
-| T-1.4 | Dockerfiles multi-stage (api y web según plan 3.8.1) + `docker-compose.dev.yml` con MySQL 8 (`utf8mb4`, healthcheck) | plan 3.8.1/3.8.2, RNF-06 | T-1.3 | M | `docker compose up` deja `GET /health` → 200 con `db: ok`; imagen api corre como non-root |
-| T-1.5 | Alembic inicializado + migración 1: `users`, `refresh_tokens` (tipos exactos del plan 3.6) | plan 3.6, ADR-003 | T-1.4 | S | Test de migración up/down contra MySQL efímero; collations verificadas en test (`utf8mb4`) |
-| T-1.6 | Migración 2: `reconciliation_runs`, `source_files`, `column_mappings` con uniques (`run_id+role`, `source_file_id+logical_field`) | plan 3.6, RF-10 | T-1.5 | S | Test: insertar duplicado de unique falla; enums correctos |
-| T-1.7 | Migración 3: `error_families` + `error_codes` con **seeds** (7 familias, 53 códigos mapeados) + `run_items`, `item_errors`, `duplicate_findings` (índice `(run_id, sync_status, feed_stock DESC)`, `utf8mb4_bin` en claves de cruce) | spec 2.8, plan 3.6, RF-14 | T-1.6 | M | Test: seed presente tras migrar (7 familias, 53 códigos, ninguno `SIN_CLASIFICAR`); `EXPLAIN` del query de Vista 3 usa el índice compuesto |
-| T-1.8 | CI GitHub Actions (on: pull_request): lint + type-check + tests + cobertura ≥ 80% + build de imágenes | plan 3.8.3 | T-1.4 | M | PR de prueba muestra los checks en verde; un type-error intencional rompe el pipeline |
+| ID | Estado | Tarea | Traza a | Dep. | Est. | DoD específico (además del global) |
+|---|---|---|---|---|---|---|
+| T-1.1 | ✅ | Monorepo `backend/` + `frontend/` con tooling completo: ruff, mypy --strict, pytest, pytest-bdd; eslint, tsc, vitest; lockfiles; pre-commit | ADR-001 | — | M | `pytest` y `vitest` corren (0 tests) sin error; lint/type-check en verde sobre esqueleto vacío |
+| T-1.2 | ✅ | Fixtures canónicos: anonimizar los 3 ficheros reales y colocarlos en `tests/fixtures/` con un README de su estructura (incluye casos `03763BAR`, `K2.65`, fila ejemplo `ABC123`, bloque por-SKU en fila 572, NBSP) | spec 2.2 | T-1.1 | S | Test trivial que abre los 3 fixtures y verifica conteos de filas conocidos (1232 / 4156 / 8173) |
+| T-1.3 | ✅ | Esqueleto FastAPI hexagonal: paquetes `auth`, `ingestion`, `mapping`, `reconciliation`, `reporting`, `platform`; endpoint `/api/v1/health`; settings 12-factor | ADR-001, plan 3.7 | T-1.1 | M | Test de integración: `GET /health` → 200 `{status, db}`; lint de arquitectura (import-linter) configurado y en verde |
+| T-1.4 | ✅ | Dockerfiles multi-stage (api y web según plan 3.8.1) + `docker-compose.dev.yml` con MySQL 8 (`utf8mb4`, healthcheck) | plan 3.8.1/3.8.2, RNF-06 | T-1.3 | M | `docker compose up` deja `GET /health` → 200 con `db: ok`; imagen api corre como non-root |
+| T-1.5 | ✅ | Alembic inicializado + migración 1: `users`, `refresh_tokens` (tipos exactos del plan 3.6) | plan 3.6, ADR-003 | T-1.4 | S | Test de migración up/down contra MySQL efímero; collations verificadas en test (`utf8mb4`) |
+| T-1.6 | ✅ | Migración 2: `reconciliation_runs`, `source_files`, `column_mappings` con uniques (`run_id+role`, `source_file_id+logical_field`) | plan 3.6, RF-10 | T-1.5 | S | Test: insertar duplicado de unique falla; enums correctos |
+| T-1.7 | ✅ | Migración 3: `error_families` + `error_codes` con **seeds** (7 familias, 53 códigos mapeados) + `run_items`, `item_errors`, `duplicate_findings` (índice `(run_id, sync_status, feed_stock DESC)`, `utf8mb4_bin` en claves de cruce) | spec 2.8, plan 3.6, RF-14 | T-1.6 | M | Test: seed presente tras migrar (7 familias, 53 códigos, ninguno `SIN_CLASIFICAR`); `EXPLAIN` del query de Vista 3 usa el índice compuesto |
+| T-1.8 | ⏳ | CI GitHub Actions (on: pull_request): lint + type-check + tests + cobertura ≥ 80% + build de imágenes | plan 3.8.3 | T-1.4 | M | PR de prueba muestra los checks en verde; un type-error intencional rompe el pipeline |
 > **⚠️ DIFERIDO:** El pipeline CI/CD de GitHub Actions se pospone temporalmente por decisión estratégica (core funcional primero). Se retoma antes del Hito M6. Los checks de lint y tests se ejecutan localmente hasta entonces. |
-| T-1.9 | Esqueleto React: Vite + router + **layout shell multi-módulo** (menú lateral preparado para módulos futuros) servido por nginx del contenedor `web` | intent 1.3, ADR-001 | T-1.4 | M | `docker compose up` sirve el shell en `:80`; test de render del layout en vitest |
+| T-1.9 | ✅ | Esqueleto React: Vite + router + **layout shell multi-módulo** (menú lateral preparado para módulos futuros) servido por nginx del contenedor `web` | intent 1.3, ADR-001 | T-1.4 | M | `docker compose up` sirve el shell en `:80`; test de render del layout en vitest |
 
 ### M2 — Autenticación y Shell SaaS (ADR-003)
 
 > **⚠️ HITO DIFERIDO:** Por decisión estratégica para alcanzar un core funcional (M3–M5) de forma rápida, M2 queda pospuesto al final del proyecto, antes de M6. Durante M3–M5 se usa un bypass de autenticación simulado (ver nota en M3). Se retoma y completa en su totalidad previo al endurecimiento de producción.
 
-| ID | Tarea | Traza a | Dep. | Est. | DoD específico |
-|---|---|---|---|---|---|
-| T-2.1 | Dominio usuario: hashing **Argon2id** (parámetros calibrados, fronteras `bytes/str` estrictas) + repositorio + comando seed de usuario admin | RNF-04, plan 3.9 | M1 | S | Tests: hash/verify round-trip; verify en tiempo constante (misma rama de código para fallo); mypy estricto sin `Any` en el módulo crypto |
-| T-2.2 | Emisión y verificación de **Access JWT RS256**: par de claves por settings, claims (`sub`, `role`, `jti`, `iss`, `aud`, `exp` 15 min), dependencia FastAPI `require_role` | ADR-003, RF-11 | T-2.1 | M | Tests: token expirado → 401; firma inválida → 401; claim `role` aplica RBAC; clave privada nunca en respuesta ni logs |
-| T-2.3 | `POST /auth/login`: credenciales → access + **cookie refresh** (`HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`), refresh opaco 256-bit persistido como SHA-256 con `family_id` | ADR-003, plan 3.7 | T-2.2 | M | Test de integración: login feliz; 401 genérico (mismo mensaje y timing usuario inexistente vs contraseña errónea); cookie con todos los atributos |
-| T-2.4 | `POST /auth/refresh` con **rotación** + **detección de reutilización** (refresh ya rotado ⇒ revocar familia completa) y `POST /auth/logout` | ADR-003, OBJ-05 | T-2.3 | M | Tests: rotación emite par nuevo y marca `replaced_by`; reutilización del viejo → 401 y TODA la familia revocada; logout revoca familia |
-| T-2.5 | Frontend auth: pantalla de login + almacenamiento del access en memoria + **interceptor de renovación transparente** (401 por expiración → refresh → reintento, sin interacción) + guardas de ruta | OBJ-05, RF-11 | T-2.4, T-1.9 | M | Test E2E (Playwright): sesión sigue viva tras expirar el access sin que el usuario perciba nada; logout limpia estado |
+| ID | Estado | Tarea | Traza a | Dep. | Est. | DoD específico |
+|---|---|---|---|---|---|---|
+| T-2.1 | ⏳ | Dominio usuario: hashing **Argon2id** (parámetros calibrados, fronteras `bytes/str` estrictas) + repositorio + comando seed de usuario admin | RNF-04, plan 3.9 | M1 | S | Tests: hash/verify round-trip; verify en tiempo constante (misma rama de código para fallo); mypy estricto sin `Any` en el módulo crypto |
+| T-2.2 | ⏳ | Emisión y verificación de **Access JWT RS256**: par de claves por settings, claims (`sub`, `role`, `jti`, `iss`, `aud`, `exp` 15 min), dependencia FastAPI `require_role` | ADR-003, RF-11 | T-2.1 | M | Tests: token expirado → 401; firma inválida → 401; claim `role` aplica RBAC; clave privada nunca en respuesta ni logs |
+| T-2.3 | ⏳ | `POST /auth/login`: credenciales → access + **cookie refresh** (`HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`), refresh opaco 256-bit persistido como SHA-256 con `family_id` | ADR-003, plan 3.7 | T-2.2 | M | Test de integración: login feliz; 401 genérico (mismo mensaje y timing usuario inexistente vs contraseña errónea); cookie con todos los atributos |
+| T-2.4 | ⏳ | `POST /auth/refresh` con **rotación** + **detección de reutilización** (refresh ya rotado ⇒ revocar familia completa) y `POST /auth/logout` | ADR-003, OBJ-05 | T-2.3 | M | Tests: rotación emite par nuevo y marca `replaced_by`; reutilización del viejo → 401 y TODA la familia revocada; logout revoca familia |
+| T-2.5 | ⏳ | Frontend auth: pantalla de login + almacenamiento del access en memoria + **interceptor de renovación transparente** (401 por expiración → refresh → reintento, sin interacción) + guardas de ruta | OBJ-05, RF-11 | T-2.4, T-1.9 | M | Test E2E (Playwright): sesión sigue viva tras expirar el access sin que el usuario perciba nada; logout limpia estado |
 
 ### M3 — Ingesta y Asistente de Mapeo Dinámico (gate: CA-01 y CA-04 verdes)
 
 > **🔧 BYPASS DE AUTH ACTIVO:** Dado que M2 está diferido, todos los endpoints de M3 (y M4/M5) usan la dependencia FastAPI `get_current_user` que devuelve un usuario `admin` dummy quemado en código. Un usuario equivalente se inserta en la BD mediante script de seed (`scripts/seed_dummy_user.py`) para satisfacer las FK de `reconciliation_runs` y `source_files`. Este bypass se reemplaza por la implementación real de M2 antes de M6.
 
-| ID | Tarea | Traza a | Dep. | Est. | DoD específico |
-|---|---|---|---|---|---|
-| T-3.1 | **Normalización de SKU** RN-01..RN-06 como función pura + manejo de inválidos (`#N/A`…) | spec 2.5, RF-04 | M1 | S | Tests de tabla: `" twa85xl\u00a0"`→`TWA85XL`, `03763BAR` intacto, `K2.65` intacto como string, `#N/A` → inválido contabilizado |
-| T-3.2 | Puerto `SourceParser` + **parser CSV/TXT**: cascada de encoding (UTF-8→cp1252→latin-1), sniffing de delimitador, `dtype=str` universal | ADR-004, RF-01, RNF-03 | T-3.1 | M | Test con fixture fullstock real: 4.156 filas, `03763BAR` byte a byte; test con CSV cp1252 sintético |
-| T-3.3 | **Parser Excel** (`.xlsx`/`.xlsm`) en modo solo-lectura: listado de hojas, lectura como texto, macros jamás evaluadas | ADR-004, RF-02, EB-06 | T-3.2 | M | Test con fixture Libro1: columna D `(sin nombre)` con `#N/A`; test con fixture `.xlsm`: 8 hojas listadas |
-| T-3.4 | **Localizador de bloques por título** ("Errores y advertencias por SKU") + doble cabecera de `Plantilla` + descarte de fila ejemplo de Amazon | EB-02/03/04, ADR-004 | T-3.3 | M | Tests con fixture reporte: bloque hallado en fila 572 con SKU en última columna; fila `ABC123` descartada y contada en `discarded_rows`; sin título → error pedible al usuario (fallback EB-03) |
-| T-3.5 | **Heurística de sugerencia de columnas** (nombres candidatos + perfil de valores: unicidad, patrón) con `confidence` y `reason` explicables | OBJ-03, plan 3.7 | T-3.4 | M | Tests: sugiere `sku`/`stock` correctos en los 3 fixtures; nunca devuelve confianza sin `reason`; la heurística NO confirma nada por sí sola |
-| T-3.6 | Endpoints `POST /runs`, `POST /runs/{id}/files` (multipart + role, SHA-256, staging en volumen, metadatos detectados) | RF-01, plan 3.7, RNF-05 | T-3.3, M2 | M | Tests de integración: subir los 3 fixtures crea `source_files` con sha256 y unique `(run_id, role)`; >50 MB → 413 |
-| T-3.7 | Endpoint `GET .../preview` con el **contrato exacto** del plan 3.7 (hojas, bloque, cabeceras, muestra, sugerencias, warnings) | RF-03, plan 3.7 | T-3.5, T-3.6 | M | Test de contrato contra los 3 fixtures: respuesta valida contra JSON Schema del plan; lo mostrado proviene del mismo parser (sin doble implementación) |
-| T-3.8 | Endpoint `PUT .../mapping` + **validación en muestra** (stock numérico, unicidad razonable de SKU) + persistencia `column_mappings` con `confirmed_by` | RF-03, OBJ-03 | T-3.7 | M | **BDD CA-04 verde** (columna no numérica → warnings → degradación explícita); mapeo sin confirmar → `POST /process` responde 409 |
-| T-3.9 | Frontend: **wizard de mapeo pasos 1–4** (carga triple, selección de hoja, mapeo con previsualización y sugerencias marcadas, resumen) con gate bloqueante del botón Procesar | spec 2.9, RNF-08 | T-3.7, T-2.5 | L | Test E2E: flujo completo con los 3 fixtures; botón Procesar deshabilitado hasta mapeo completo (RNF-08) |
-| T-3.10 | **Gate del hito:** suite BDD CA-01 completa (3 escenarios) implementada con pytest-bdd sobre la API real | CA-01 | T-3.8 | S | **CA-01 y CA-04 100% verdes en CI**; los Gherkin del spec se ejecutan literalmente, sin reescritura |
+| ID | Estado | Tarea | Traza a | Dep. | Est. | DoD específico |
+|---|---|---|---|---|---|---|
+| T-3.1 | ✅ | **Normalización de SKU** RN-01..RN-06 como función pura + manejo de inválidos (`#N/A`…) | spec 2.5, RF-04 | M1 | S | Tests de tabla: `" twa85xl\u00a0"`→`TWA85XL`, `03763BAR` intacto, `K2.65` intacto como string, `#N/A` → inválido contabilizado |
+| T-3.2 | ✅ | Puerto `SourceParser` + **parser CSV/TXT**: cascada de encoding (UTF-8→cp1252→latin-1), sniffing de delimitador, `dtype=str` universal | ADR-004, RF-01, RNF-03 | T-3.1 | M | Test con fixture fullstock real: 4.156 filas, `03763BAR` byte a byte; test con CSV cp1252 sintético |
+| T-3.3 | ✅ | **Parser Excel** (`.xlsx`/`.xlsm`) en modo solo-lectura: listado de hojas, lectura como texto, macros jamás evaluadas | ADR-004, RF-02, EB-06 | T-3.2 | M | Test con fixture Libro1: columna D `(sin nombre)` con `#N/A`; test con fixture `.xlsm`: 8 hojas listadas |
+| T-3.4 | ✅ | **Localizador de bloques por título** ("Errores y advertencias por SKU") + doble cabecera de `Plantilla` + descarte de fila ejemplo de Amazon | EB-02/03/04, ADR-004 | T-3.3 | M | Tests con fixture reporte: bloque hallado en fila 572 con SKU en última columna; fila `ABC123` descartada y contada en `discarded_rows`; sin título → error pedible al usuario (fallback EB-03) |
+| T-3.5 | ✅ | **Heurística de sugerencia de columnas** (nombres candidatos + perfil de valores: unicidad, patrón) con `confidence` y `reason` explicables | OBJ-03, plan 3.7 | T-3.4 | M | Tests: sugiere `sku`/`stock` correctos en los 3 fixtures; nunca devuelve confianza sin `reason`; la heurística NO confirma nada por sí sola |
+| T-3.6 | ✅ | Endpoints `POST /runs`, `POST /runs/{id}/files` (multipart + role, SHA-256, staging en volumen, metadatos detectados) | RF-01, plan 3.7, RNF-05 | T-3.3, M2 | M | Tests de integración: subir los 3 fixtures crea `source_files` con sha256 y unique `(run_id, role)`; >50 MB → 413 |
+| T-3.7 | ✅ | Endpoint `GET .../preview` con el **contrato exacto** del plan 3.7 (hojas, bloque, cabeceras, muestra, sugerencias, warnings) | RF-03, plan 3.7 | T-3.5, T-3.6 | M | Test de contrato contra los 3 fixtures: respuesta valida contra JSON Schema del plan; lo mostrado proviene del mismo parser (sin doble implementación) |
+| T-3.8 | ✅ | Endpoint `PUT .../mapping` + **validación en muestra** (stock numérico, unicidad razonable de SKU) + persistencia `column_mappings` con `confirmed_by` | RF-03, OBJ-03 | T-3.7 | M | **BDD CA-04 verde** (columna no numérica → warnings → degradación explícita); mapeo sin confirmar → `POST /process` responde 409 |
+| T-3.9 | ✅ | Frontend: **wizard de mapeo pasos 1–4** (carga triple, selección de hoja, mapeo con previsualización y sugerencias marcadas, resumen) con gate bloqueante del botón Procesar | spec 2.9, RNF-08 | T-3.7, T-2.5 | L | Test E2E: flujo completo con los 3 fixtures; botón Procesar deshabilitado hasta mapeo completo (RNF-08) |
+| T-3.10 | ✅ | **Gate del hito:** suite BDD CA-01 completa (3 escenarios) implementada con pytest-bdd sobre la API real | CA-01 | T-3.8 | S | **CA-01 y CA-04 100% verdes en CI**; los Gherkin del spec se ejecutan literalmente, sin reescritura |
 
 ### M4 — Motor de Conciliación (gate: CA-02 y CA-03 verdes)
 
@@ -126,10 +126,10 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 
 | Requisito (Spec) | Criterio BDD | Componente (Plan) | Tareas | Cobertura |
 |---|---|---|---|---|
-| RF-01 (carga 3 ficheros) | CA-01 | `ingestion` / contratos 3.7 | T-3.2, T-3.3, T-3.6 | ⏳ |
-| RF-02 (multi-hoja) | CA-01 | `ingestion` (ADR-004) | T-3.3, T-3.4 | ⏳ |
-| RF-03 (mapeo confirmado bloqueante) | CA-01, CA-04 | `mapping` / preview 3.7 | T-3.5, T-3.7, T-3.8, T-3.9 | ⏳ |
-| RF-04 (normalización SKU) | CA-02, CA-03 | RN-01..06 / `ingestion` | T-3.1 | ⏳ |
+| RF-01 (carga 3 ficheros) | CA-01 | `ingestion` / contratos 3.7 | T-3.2, T-3.3, T-3.6 | ✅ M3 |
+| RF-02 (multi-hoja) | CA-01 | `ingestion` (ADR-004) | T-3.3, T-3.4 | ✅ M3 |
+| RF-03 (mapeo confirmado bloqueante) | CA-01, CA-04 | `mapping` / preview 3.7 | T-3.5, T-3.7, T-3.8, T-3.9 | ✅ M3 |
+| RF-04 (normalización SKU) | CA-02, CA-03 | RN-01..06 / `ingestion` | T-3.1 | ✅ M3 |
 | RF-05 (duplicados) | CA-03 | `reconciliation` / política 2.6 | T-4.2 | ⏳ |
 | RF-06 (conciliación asíncrona) | CA-02 | `TaskRunner` (ADR-002) | T-4.1, T-4.3, T-4.6 | ⏳ |
 | RF-07 (errores 1:N) | CA-02 | `reconciliation` / `item_errors` | T-4.4 | ⏳ |
@@ -141,12 +141,12 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | RF-13 (histórico) | — | `reporting` | T-5.5 | ⏳ |
 | RF-14 (familias de error) | CA-05 | taxonomía 2.8 / seeds 3.6 | T-1.7, T-4.4, T-5.1, T-5.6 | ⏳ |
 | RNF-01/02 (latencias) | — | presupuesto 3.11 | T-4.5, T-6.3 | ⏳ |
-| RNF-03 (SKU como texto) | CA-01 | ADR-004 | T-3.1, T-3.2 | ⏳ |
+| RNF-03 (SKU como texto) | CA-01 | ADR-004 | T-3.1, T-3.2 | ✅ M3 |
 | RNF-04 (seguridad OWASP) | — | ADR-003 / 3.9 | T-2.1..T-2.4, T-6.1 | ⏳ |
 | RNF-05 (trazabilidad sha256) | — | `source_files` 3.6 | T-3.6 | ⏳ |
 | RNF-06 (contenedores) | — | 3.8 | T-1.4, T-6.4 | ⏳ |
 | RNF-07 (observabilidad) | — | 3.10 | T-6.2 | ⏳ |
-| RNF-08 (gate bloqueante UI) | CA-01 | wizard 2.9 | T-3.8, T-3.9 | ⏳ |
+| RNF-08 (gate bloqueante UI) | CA-01 | wizard 2.9 | T-3.8, T-3.9 | ✅ M3 |
 
 > Verificación de completitud: los 14 RF y los 8 RNF tienen tareas asignadas; ninguna tarea carece de traza. Los 5 CA actúan como gates de hito (M3: CA-01/04 · M4: CA-02/03 · M5: CA-05).
 

@@ -7,8 +7,12 @@ No secrets or credentials are ever hard-coded here.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolved at import time: backend/src/marketplace_conciliator/ → ../../.. → backend/
+_BACKEND_ROOT: Path = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -29,6 +33,11 @@ class Settings(BaseSettings):
     # Full SQLAlchemy URL, e.g. "mysql+aiomysql://user:pass@host/db"
     # Left empty so the health probe reports "unconfigured" until T-1.4 wires it.
     database_url: str = ""
+
+    # ── File staging (T-3.6 / T-3.7) ─────────────────────────────────────────
+    # Directory where uploaded source files are persisted for later parsing.
+    # Overridable via STAGING_DIR env var. Created automatically if absent.
+    staging_dir: Path = _BACKEND_ROOT / "data" / "staging"
 
 
 @lru_cache

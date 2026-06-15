@@ -1,0 +1,216 @@
+/**
+ * ConciliacionPage — orchestrates the 4-step mapping wizard (T-3.9).
+ *
+ * Owns:
+ *   - All wizard state via useWizardState()
+ *   - API side-effects (createRun, uploadFile, getPreview, confirmMapping)
+ *   - Step navigation
+ *
+ * Children (step components) receive state slices and callbacks; they never
+ * call the API directly — all I/O is here.
+ */
+
+import { useRef, type JSX } from "react";
+import { StepIndicator } from "../components/wizard/StepIndicator";
+import { Step1Upload } from "../components/wizard/steps/Step1Upload";
+import { Step2SheetPicker } from "../components/wizard/steps/Step2SheetPicker";
+import { Step3Mapping } from "../components/wizard/steps/Step3Mapping";
+import { Step4Summary } from "../components/wizard/steps/Step4Summary";
+import { useWizardState } from "../hooks/useWizardState";
+import * as api from "../api/ingestion";
+import type { FileRole } from "../types/ingestion";
+
+export function ConciliacionPage(): JSX.Element {
+  const { state, dispatch, allFilesUploaded, allMappingsConfirmed, excelRoles } =
+    useWizardState();
+
+  /**
+   * Ensures a run is created exactly once even if multiple uploads fire
+   * concurrently. The promise is cached in a ref.
+   */
+  const runPromiseRef = useRef<Promise<number> | null>(null);
+
+  const ensureRun = (): Promise<number> => {
+    if (state.runId !== null) return Promise.resolve(state.runId);
+    if (runPromiseRef.current !== null) return runPromiseRef.current;
+
+    const p = api.createRun().then((run) => {
+      dispatch({ type: "SET_RUN_ID", runId: run.id });
+      return run.id;
+    });
+    runPromiseRef.current = p;
+    return p;
+  };
+
+  // ---------------------------------------------------------------------------
+  // Step 1 — upload
+  // ---------------------------------------------------------------------------
+
+  const handleFile = async (role: FileRole, file: File): Promise<void> => {
+    dispatch({ type: "FILE_SELECTED", role, file });
+    dispatch({ type: "FILE_UPLOADING", role });
+    try {
+      const runId = await ensureRun();
+      const sourceFile = await api.uploadFile(runId, role, file);
+      dispatch({ type: "FILE_UPLOADED", role, sourceFile });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Error desconocido al subir";
+      dispatch({ type: "FILE_UPLOAD_ERROR", role, error: msg });
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Step 2 — sheet selection
+  // ---------------------------------------------------------------------------
+
+  const handleSheetChange = (role: FileRole, sheet: string): void => {
+    dispatch({ type: "SHEET_SELECTED", role, sheet });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Preview fetch (used in Step 2 and Step 3)
+  // ---------------------------------------------------------------------------
+
+  const handleFetchPreview = async (role: FileRole, sheet?: string): Promise<void> => {
+    const { sourceFileId } = state.files[role];
+    if (state.runId === null || sourceFileId === null) return;
+
+    dispatch({ type: "PREVIEW_LOADING", role });
+    try {
+      const preview = await api.getPreview(state.runId, sourceFileId, sheet);
+      dispatch({ type: "PREVIEW_LOADED", role, preview });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Error al cargar la vista previa";
+      dispatch({ type: "PREVIEW_ERROR", role, error: msg });
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Step 3 — mapping
+  // ---------------------------------------------------------------------------
+
+  const handleMappingChange = (
+    role: FileRole,
+    logicalField: string,
+    columnIndex: number
+  ): void => {
+    dispatch({ type: "MAPPING_CHANGED", role, logicalField, columnIndex });
+  };
+
+  const handleConfirmMapping = async (role: FileRole): Promise<void> => {
+    const { sourceFileId, pendingMappings, preview } = state.files[role];
+    if (state.runId === null || sourceFileId === null || !preview) return;
+
+    const mappings = Object.entries(pendingMappings).map(([logical_field, column_index]) => ({
+      logical_field,
+      column_index,
+      was_suggested:
+        preview.suggestions[logical_field]?.column_index === column_index,
+    }));
+
+    try {
+      const result = await api.confirmMapping(state.runId, sourceFileId, mappings);
+      dispatch({ type: "MAPPING_CONFIRMED", role, warnings: result.warnings });
+    } catch (err) {
+      // Surface the error via PREVIEW_ERROR so the user sees it in the panel
+      const msg = err instanceof Error ? err.message : "Error al confirmar mapeo";
+      dispatch({ type: "PREVIEW_ERROR", role, error: msg });
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Step 4 — process (placeholder: T-4.6 will implement the actual endpoint)
+  // ---------------------------------------------------------------------------
+
+  const handleProcess = (): void => {
+    // RNF-08 double-check: should never be called when not confirmed
+    if (!allMappingsConfirmed) return;
+    // TODO T-4.6: POST /runs/{id}/process
+    alert(`Run #${state.runId ?? "?"} listo para procesar. (T-4.6 pendiente)`);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Navigation helpers
+  // ---------------------------------------------------------------------------
+
+  const goTo = (step: 1 | 2 | 3 | 4) => () =>
+    dispatch({ type: "SET_STEP", step });
+
+  const advanceToStep2 = () => {
+    // If no Excel files, skip step 2 entirely
+    if (excelRoles.length === 0) {
+      dispatch({ type: "SET_STEP", step: 3 });
+    } else {
+      dispatch({ type: "SET_STEP", step: 2 });
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.inner}>
+        <StepIndicator currentStep={state.step} />
+
+        {state.step === 1 && (
+          <Step1Upload
+            files={state.files}
+            onFile={handleFile}
+            onNext={advanceToStep2}
+            allUploaded={allFilesUploaded}
+          />
+        )}
+
+        {state.step === 2 && (
+          <Step2SheetPicker
+            files={state.files}
+            excelRoles={excelRoles}
+            onSheetChange={handleSheetChange}
+            onNext={goTo(3)}
+            onBack={goTo(1)}
+            onFetchPreview={handleFetchPreview}
+          />
+        )}
+
+        {state.step === 3 && (
+          <Step3Mapping
+            files={state.files}
+            onFetchPreview={handleFetchPreview}
+            onMappingChange={handleMappingChange}
+            onConfirmMapping={handleConfirmMapping}
+            onNext={goTo(4)}
+            onBack={goTo(2)}
+            allConfirmed={allMappingsConfirmed}
+          />
+        )}
+
+        {state.step === 4 && (
+          <Step4Summary
+            runId={state.runId}
+            files={state.files}
+            allConfirmed={allMappingsConfirmed}
+            onProcess={handleProcess}
+            onBack={goTo(3)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  page: {
+    padding: "32px",
+    minHeight: "100%",
+  },
+  inner: {
+    maxWidth: "900px",
+    margin: "0 auto",
+    backgroundColor: "var(--color-surface)",
+    borderRadius: "var(--radius-lg)",
+    border: "1px solid var(--color-border)",
+    padding: "32px",
+  },
+} as const;

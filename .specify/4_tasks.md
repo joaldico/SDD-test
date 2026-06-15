@@ -56,9 +56,12 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-1.6 | Migración 2: `reconciliation_runs`, `source_files`, `column_mappings` con uniques (`run_id+role`, `source_file_id+logical_field`) | plan 3.6, RF-10 | T-1.5 | S | Test: insertar duplicado de unique falla; enums correctos |
 | T-1.7 | Migración 3: `error_families` + `error_codes` con **seeds** (7 familias, 53 códigos mapeados) + `run_items`, `item_errors`, `duplicate_findings` (índice `(run_id, sync_status, feed_stock DESC)`, `utf8mb4_bin` en claves de cruce) | spec 2.8, plan 3.6, RF-14 | T-1.6 | M | Test: seed presente tras migrar (7 familias, 53 códigos, ninguno `SIN_CLASIFICAR`); `EXPLAIN` del query de Vista 3 usa el índice compuesto |
 | T-1.8 | CI GitHub Actions (on: pull_request): lint + type-check + tests + cobertura ≥ 80% + build de imágenes | plan 3.8.3 | T-1.4 | M | PR de prueba muestra los checks en verde; un type-error intencional rompe el pipeline |
+> **⚠️ DIFERIDO:** El pipeline CI/CD de GitHub Actions se pospone temporalmente por decisión estratégica (core funcional primero). Se retoma antes del Hito M6. Los checks de lint y tests se ejecutan localmente hasta entonces. |
 | T-1.9 | Esqueleto React: Vite + router + **layout shell multi-módulo** (menú lateral preparado para módulos futuros) servido por nginx del contenedor `web` | intent 1.3, ADR-001 | T-1.4 | M | `docker compose up` sirve el shell en `:80`; test de render del layout en vitest |
 
 ### M2 — Autenticación y Shell SaaS (ADR-003)
+
+> **⚠️ HITO DIFERIDO:** Por decisión estratégica para alcanzar un core funcional (M3–M5) de forma rápida, M2 queda pospuesto al final del proyecto, antes de M6. Durante M3–M5 se usa un bypass de autenticación simulado (ver nota en M3). Se retoma y completa en su totalidad previo al endurecimiento de producción.
 
 | ID | Tarea | Traza a | Dep. | Est. | DoD específico |
 |---|---|---|---|---|---|
@@ -69,6 +72,8 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-2.5 | Frontend auth: pantalla de login + almacenamiento del access en memoria + **interceptor de renovación transparente** (401 por expiración → refresh → reintento, sin interacción) + guardas de ruta | OBJ-05, RF-11 | T-2.4, T-1.9 | M | Test E2E (Playwright): sesión sigue viva tras expirar el access sin que el usuario perciba nada; logout limpia estado |
 
 ### M3 — Ingesta y Asistente de Mapeo Dinámico (gate: CA-01 y CA-04 verdes)
+
+> **🔧 BYPASS DE AUTH ACTIVO:** Dado que M2 está diferido, todos los endpoints de M3 (y M4/M5) usan la dependencia FastAPI `get_current_user` que devuelve un usuario `admin` dummy quemado en código. Un usuario equivalente se inserta en la BD mediante script de seed (`scripts/seed_dummy_user.py`) para satisfacer las FK de `reconciliation_runs` y `source_files`. Este bypass se reemplaza por la implementación real de M2 antes de M6.
 
 | ID | Tarea | Traza a | Dep. | Est. | DoD específico |
 |---|---|---|---|---|---|

@@ -9,7 +9,7 @@ Critical constraints:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 — SQLAlchemy resolves Mapped[datetime] at runtime
 from typing import Any
 
 from sqlalchemy import ForeignKey, Index, String, UniqueConstraint

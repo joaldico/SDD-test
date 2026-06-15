@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 — SQLAlchemy resolves Mapped[datetime] at runtime
 
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.dialects.mysql import BIGINT, CHAR, DATETIME, ENUM

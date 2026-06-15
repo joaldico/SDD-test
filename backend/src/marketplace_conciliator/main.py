@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from marketplace_conciliator.ingestion.router import router as ingestion_router
 from marketplace_conciliator.platform.health import router as health_router
 
 
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(health_router, prefix="/api/v1")
+    application.include_router(ingestion_router, prefix="/api/v1")
 
     return application
 

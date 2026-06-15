@@ -6,5 +6,23 @@ from marketplace_conciliator.platform.db.models.runs import (
     ReconciliationRun,
     SourceFile,
 )
+from marketplace_conciliator.platform.db.models.taxonomy import (
+    DuplicateFinding,
+    ErrorCode,
+    ErrorFamily,
+    ItemError,
+    RunItem,
+)
 
-__all__ = ["ColumnMapping", "ReconciliationRun", "RefreshToken", "SourceFile", "User"]
+__all__ = [
+    "ColumnMapping",
+    "DuplicateFinding",
+    "ErrorCode",
+    "ErrorFamily",
+    "ItemError",
+    "ReconciliationRun",
+    "RefreshToken",
+    "RunItem",
+    "SourceFile",
+    "User",
+]

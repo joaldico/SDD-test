@@ -11,9 +11,6 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Resolved at import time: backend/src/marketplace_conciliator/ → ../../.. → backend/
-_BACKEND_ROOT: Path = Path(__file__).resolve().parent.parent.parent
-
 
 class Settings(BaseSettings):
     """Application settings resolved from the environment (12-factor, ADR-001)."""
@@ -36,8 +33,14 @@ class Settings(BaseSettings):
 
     # ── File staging (T-3.6 / T-3.7) ─────────────────────────────────────────
     # Directory where uploaded source files are persisted for later parsing.
-    # Overridable via STAGING_DIR env var. Created automatically if absent.
-    staging_dir: Path = _BACKEND_ROOT / "data" / "staging"
+    # Overridable via STAGING_DIR env var; created automatically if absent.
+    #
+    # IMPORTANT: Do NOT derive this from __file__ — when the package is installed
+    # as a wheel, __file__ resolves inside site-packages (e.g.
+    # /usr/local/lib/python3.12/site-packages/…), not the project tree.
+    # The default below is the canonical path inside the Docker container.
+    # For local development outside Docker, set STAGING_DIR in your .env file.
+    staging_dir: Path = Path("/app/data/staging")
 
 
 @lru_cache

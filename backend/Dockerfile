@@ -47,6 +47,23 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels \
       marketplace-conciliator-api \
     && rm -rf /wheels
 
+# Copy Alembic configuration and migration scripts into the image.
+# These are NOT part of the installable wheel (they're dev/ops artefacts),
+# so they must be copied explicitly.  alembic.ini uses script_location=alembic
+# which resolves relative to WORKDIR (/app).
+COPY --chown=appuser:appgroup alembic.ini   ./alembic.ini
+COPY --chown=appuser:appgroup alembic/      ./alembic/
+COPY --chown=appuser:appgroup scripts/      ./scripts/
+COPY --chown=appuser:appgroup entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+# Create the staging directory tree with appuser ownership BEFORE switching to
+# the non-root user.  The Settings default (and STAGING_DIR env var) point here.
+# When docker-compose mounts a named volume at /app/data/staging, Docker
+# initialises it from this directory — preserving ownership (uid 1001).
+RUN mkdir -p /app/data/staging \
+    && chown -R appuser:appgroup /app/data
+
 USER appuser:appgroup
 
 EXPOSE 8000
@@ -56,8 +73,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c \
     "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health').read()"
 
+# Entrypoint runs `alembic upgrade head` then starts uvicorn.
 # 1 worker: BackgroundTasks jobs hold in-process state (ADR-002).
-# Scaled to multiple instances via load balancer, not multiple workers.
-CMD ["uvicorn", "marketplace_conciliator.main:app", \
-     "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "1"]
+ENTRYPOINT ["./entrypoint.sh"]

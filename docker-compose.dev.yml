@@ -53,6 +53,14 @@ services:
       APP_ENV:      development
       DEBUG:        "true"
       DATABASE_URL: "mysql+aiomysql://${MYSQL_USER:-conciliador}:${MYSQL_PASSWORD:-dev_password}@mysql:3306/${MYSQL_DATABASE:-conciliador_dev}"
+      # Absolute path inside the container — appuser (uid 1001) owns this dir.
+      # Override with STAGING_DIR in your .env file if needed.
+      STAGING_DIR:  /app/data/staging
+    volumes:
+      # Named volume keeps uploaded files between container restarts / image rebuilds.
+      # The volume is initialised from the image path (/app/data/staging, owned by
+      # appuser:appgroup) on first mount, so write permissions are correct from the start.
+      - staging_data:/app/data/staging
     # api may only start once MySQL is accepting connections (healthcheck green)
     depends_on:
       mysql:
@@ -80,6 +88,9 @@ services:
 # ── Persistent volumes ──────────────────────────────────────────────────────
 volumes:
   dbdata:
+    driver: local
+  # Uploaded source files — persists between restarts / image rebuilds.
+  staging_data:
     driver: local
 
 # ── Internal networks ───────────────────────────────────────────────────────

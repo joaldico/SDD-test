@@ -1,7 +1,7 @@
 # 4. Desglose de Tareas (Tasks) — Módulo 1: Conciliador de Errores de Publicación Marketplace
 
 > **Fase SDD:** `4/4 — Task Breakdown`
-> **Estado:** `🔵 En ejecución — Hito M5 en progreso (M4 cerrado 2026-06-16; T-4.6 validada en backend y frontend)`
+> **Estado:** `🟢 M5 cerrado — T-5.6 validada en backend y frontend (2026-06-16)`
 > **Versión:** `1.3.0`
 > **Última actualización:** 2026-06-16
 > **Trazabilidad:** ejecuta [`3_plan.md`](./3_plan.md) v1.0.0 (🟢 Aprobado), verifica contra [`2_spec.md`](./2_spec.md) v1.1.0 (🟢 Aprobado)
@@ -35,7 +35,7 @@
 | **M2** | Autenticación y Shell SaaS | Login/refresh/logout funcionales E2E con rotación y detección de reutilización; layout multi-módulo navegable | — (tests ADR-003) | ⏳ Diferido |
 | **M3** | Ingesta y Asistente de Mapeo | Los 3 ficheros reales se cargan, previsualizan y mapean con gate bloqueante | **CA-01, CA-04 verdes** | ✅ Cerrado |
 | **M4** | Motor de Conciliación | Pipeline completo asíncrono sobre los ficheros reales con resultados persistidos | **CA-02, CA-03 verdes** | ✅ **Cerrado** (2026-06-16) |
-| **M5** | Dashboard y Reportes (Informe, Exportación e Histórico) | 3 vistas + export xlsx/csv + histórico de runs | **CA-05 verde** | 🔵 **En progreso** |
+| **M5** | Dashboard y Reportes (Informe, Exportación e Histórico) | 3 vistas + export xlsx/csv + histórico de runs | **CA-05 verde** | ✅ **Completado** (2026-06-16) |
 | **M6** | Endurecimiento y Producción | Desplegado en EC2 con seguridad, observabilidad y rendimiento validados; UAT con el cliente | RNF-01/02/04 medidos | ⏳ Pendiente |
 
 Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente secuenciales; M2 puede solaparse con el final de M1 solo en frontend).
@@ -101,9 +101,9 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-4.5 | ✅ | Etapa **Persistencia por lotes** transaccional (`run_items` + `item_errors`) + `summary_metrics` JSON + transición `completed` | RF-10, plan 3.4 | T-4.4 | M | Test: fallo a mitad de escritura → rollback completo, run `failed`, sin filas huérfanas; run completa de fixtures persiste 4.094+ items en < 30 s (pre-validación RNF-02) |
 | T-4.6 | ✅ | Endpoints `POST /runs/{id}/process` (202 / 409 por gate) y `GET /runs/{id}/status` (fase, progreso, conteos) + frontend paso 5 (pantalla de progreso con polling) | RF-06, plan 3.5/3.7 | T-4.5, T-3.9 | M | **Backend**: TDD verde — `TestGetRunStatus`, `TestTriggerProcessGate`, `TestTriggerProcess202`, `TestPollingIntegration` + BDD CA-02/CA-03 compatibles con `_SyncTaskRunner`. **Frontend**: `Step5Progress` con polling cada 2 s, stepper de fases, métricas de cierre; 43/43 tests verdes (vitest). |
 
-### M5 — Dashboard y Reportes: Informe, Exportación e Histórico (gate: CA-05 verde) 🔵 **En progreso**
+### M5 — Dashboard y Reportes: Informe, Exportación e Histórico (gate: CA-05 verde) ✅ **Completado** (2026-06-16)
 
-> **Inicio:** 2026-06-16. Próxima tarea en cola: **T-5.3** (exportación xlsx/csv).
+> **Cierre:** 2026-06-16. T-5.1→T-5.6 validadas; CA-05 verde; admin de taxonomía operativo.
 
 | ID | Estado | Tarea | Traza a | Dep. | Est. | DoD específico |
 |---|---|---|---|---|---|---|
@@ -112,7 +112,7 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-5.3 | [x] | **Exportación** `GET .../export?format=xlsx|csv`: libro con 3 pestañas replicando las vistas | RF-09 | T-5.2 | M | **BDD CA-05 verde completo** (incluido el escenario de exportación); xlsx de fixtures abre con 3 pestañas y conteos correctos |
 | T-5.4 | [x] | Frontend: **dashboard de informe en 3 tabs** con drill-down familia→código→SKUs y botones de export | RF-08, spec 2.1 | T-5.3 | L | E2E: flujo completo upload→mapeo→proceso→informe→descarga sobre fixtures reales |
 | T-5.5 | [x] | **Histórico**: `GET /runs` paginado + reapertura de informe de runs pasadas + **mapeo recordado** por huella de cabeceras ofrecido como predeterminado | RF-12, RF-13 | T-5.4 | M | Tests: segunda run con mismos ficheros pre-rellena el mapeo (marcado como sugerencia, sigue exigiendo confirmación — OBJ-03); informe de run antigua accesible |
-| T-5.6 | ⏳ | **Admin de taxonomía**: `GET /error-families`, `PATCH /error-codes/{code}` (reasignar familia, solo `admin`) + UI mínima | RF-14, EB-10 | T-5.5 | S | Tests: `operator` → 403; reasignación se refleja en la Vista 1 de la siguiente consulta sin redespliegue |
+| T-5.6 | [x] | **Admin de taxonomía**: `GET /error-families`, `PATCH /error-codes/{code}` (reasignar familia, solo `admin`) + UI mínima | RF-14, EB-10 | T-5.5 | S | Tests: `operator` → 403; reasignación se refleja en la Vista 1 de la siguiente consulta sin redespliegue |
 
 ### M6 — Endurecimiento y Producción
 
@@ -137,13 +137,13 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | RF-05 (duplicados) | CA-03 | `reconciliation` / política 2.6 | T-4.2 | ✅ M4 |
 | RF-06 (conciliación asíncrona) | CA-02 | `TaskRunner` (ADR-002) | T-4.1, T-4.3, T-4.6 | ✅ M4 |
 | RF-07 (errores 1:N) | CA-02 | `reconciliation` / `item_errors` | T-4.4 | ✅ M4 |
-| RF-08 (informe 3 vistas) | CA-02, CA-05 | `reporting` / contratos 3.7 | T-5.1, T-5.2, T-5.4 | ⏳ |
-| RF-09 (exportación) | CA-05 | `reporting` | T-5.3 | ⏳ |
+| RF-08 (informe 3 vistas) | CA-02, CA-05 | `reporting` / contratos 3.7 | T-5.1, T-5.2, T-5.4 | ✅ M5 |
+| RF-09 (exportación) | CA-05 | `reporting` | T-5.3 | ✅ M5 |
 | RF-10 (persistencia íntegra) | — | modelo físico 3.6 | T-1.6, T-1.7, T-4.5 | ✅ M4 |
 | RF-11 (JWT) | — | ADR-003 | T-2.1..T-2.5 | ⏳ |
-| RF-12 (mapeo recordado) | — | `mapping` | T-5.5 | ⏳ |
-| RF-13 (histórico) | — | `reporting` | T-5.5 | ⏳ |
-| RF-14 (familias de error) | CA-05 | taxonomía 2.8 / seeds 3.6 | T-1.7, T-4.4, T-5.1, T-5.6 | ⏳ |
+| RF-12 (mapeo recordado) | — | `mapping` | T-5.5 | ✅ M5 |
+| RF-13 (histórico) | — | `reporting` | T-5.5 | ✅ M5 |
+| RF-14 (familias de error) | CA-05 | taxonomía 2.8 / seeds 3.6 | T-1.7, T-4.4, T-5.1, T-5.6 | ✅ M5 |
 | RNF-01/02 (latencias) | — | presupuesto 3.11 | T-4.5, T-6.3 | ⏳ |
 | RNF-03 (SKU como texto) | CA-01 | ADR-004 | T-3.1, T-3.2 | ✅ M3 |
 | RNF-04 (seguridad OWASP) | — | ADR-003 / 3.9 | T-2.1..T-2.4, T-6.1 | ⏳ |

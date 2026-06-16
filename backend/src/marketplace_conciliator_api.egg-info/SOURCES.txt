@@ -9,6 +9,8 @@ src/marketplace_conciliator/ingestion/column_suggester.py
 src/marketplace_conciliator/ingestion/csv_parser.py
 src/marketplace_conciliator/ingestion/deduplicator.py
 src/marketplace_conciliator/ingestion/excel_parser.py
+src/marketplace_conciliator/ingestion/header_fingerprint.py
+src/marketplace_conciliator/ingestion/remembered_mapping.py
 src/marketplace_conciliator/ingestion/router.py
 src/marketplace_conciliator/ingestion/sku_normalizer.py
 src/marketplace_conciliator/ingestion/source_parser.py
@@ -31,9 +33,11 @@ src/marketplace_conciliator/reconciliation/persistence.py
 src/marketplace_conciliator/reconciliation/ports.py
 src/marketplace_conciliator/reconciliation/task_runner.py
 src/marketplace_conciliator/reporting/__init__.py
+src/marketplace_conciliator/reporting/export.py
 src/marketplace_conciliator/reporting/families.py
 src/marketplace_conciliator/reporting/metrics.py
 src/marketplace_conciliator/reporting/router.py
+src/marketplace_conciliator/reporting/taxonomy_router.py
 src/marketplace_conciliator_api.egg-info/PKG-INFO
 src/marketplace_conciliator_api.egg-info/SOURCES.txt
 src/marketplace_conciliator_api.egg-info/dependency_links.txt
@@ -44,6 +48,9 @@ tests/test_canonical_fixtures.py
 tests/test_catalog_health_api.py
 tests/test_column_suggester.py
 tests/test_error_classifier.py
+tests/test_export.py
+tests/test_export_api.py
+tests/test_header_fingerprint.py
 tests/test_health.py
 tests/test_mapping_api.py
 tests/test_metrics_api.py
@@ -53,11 +60,14 @@ tests/test_migrations_taxonomy.py
 tests/test_persistence.py
 tests/test_preview_api.py
 tests/test_process_and_status_api.py
+tests/test_remembered_mapping_api.py
 tests/test_reporting_families.py
 tests/test_reporting_families_api.py
 tests/test_reporting_metrics.py
 tests/test_runs_api.py
+tests/test_runs_history_api.py
 tests/test_settings.py
 tests/test_sku_normalizer.py
 tests/test_source_parsers.py
 tests/test_task_runner.py
+tests/test_taxonomy_api.py

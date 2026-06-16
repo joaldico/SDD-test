@@ -6,6 +6,7 @@ import { ConciliacionPage } from "../pages/ConciliacionPage";
 import { HistoricoPage } from "../pages/HistoricoPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { RunReportPage } from "../pages/RunReportPage";
+import { TaxonomiaPage } from "../pages/TaxonomiaPage";
 
 /**
  * Application router — T-1.9 skeleton, extended in T-3.9.
@@ -21,6 +22,7 @@ export const router = createBrowserRouter([
       { path: "conciliacion", element: <ConciliacionPage /> },
       { path: "historico", element: <HistoricoPage /> },
       { path: "historico/:runId/informe", element: <RunReportPage /> },
+      { path: "taxonomia", element: <TaxonomiaPage /> },
     ],
   },
   {

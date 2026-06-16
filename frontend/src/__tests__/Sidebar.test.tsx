@@ -43,15 +43,15 @@ describe("Sidebar", () => {
     expect(screen.getByText(/histórico/i)).toBeInTheDocument();
   });
 
-  it("renders the Administración entry", () => {
+  it("renders the Taxonomía entry", () => {
     renderSidebar();
-    expect(screen.getByText(/administración/i)).toBeInTheDocument();
+    expect(screen.getByText(/taxonomía/i)).toBeInTheDocument();
   });
 
-  it("marks Administración as coming-soon", () => {
+  it("renders Taxonomía as an active link", () => {
     renderSidebar();
-    const badges = screen.getAllByText(/próximamente/i);
-    expect(badges.length).toBeGreaterThanOrEqual(1);
+    const link = screen.getByRole("link", { name: /taxonomía/i });
+    expect(link).toHaveAttribute("href", "/taxonomia");
   });
 
   it("renders Histórico as an active link", () => {

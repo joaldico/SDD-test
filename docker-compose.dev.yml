@@ -43,12 +43,14 @@ services:
     restart: unless-stopped
 
   # ── FastAPI + Uvicorn ────────────────────────────────────────────────────────
+  # entrypoint.sh (backend/Dockerfile) runs `alembic upgrade head` before uvicorn.
   api:
     build:
       context:    ./backend
       dockerfile: Dockerfile
       # Tag locally so docker compose doesn't pull on every up
       target: runtime
+    entrypoint: ["./entrypoint.sh"]
     environment:
       APP_ENV:      development
       DEBUG:        "true"
@@ -70,15 +72,23 @@ services:
       - backend
     restart: unless-stopped
 
-  # ── React SPA (nginx) ────────────────────────────────────────────────────────
+  # ── React SPA (Vite dev server + HMR) ────────────────────────────────────────
   web:
     build:
       context:    ./frontend
       dockerfile: Dockerfile
-      target: runtime
+      target: dev
     ports:
-      # Only port exposed to the host — all API traffic flows through nginx proxy
-      - "${WEB_PORT:-80}:80"
+      # Only port exposed to the host — API traffic flows through Vite's /api proxy
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      # Bind-mount source for Hot Reload; preserve image node_modules in an anonymous volume
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      # Vite proxy target inside the compose network (see vite.config.ts)
+      VITE_DEV_API_PROXY_TARGET: http://api:8000
+      CHOKIDAR_USEPOLLING:       "true"
     depends_on:
       - api
     networks:

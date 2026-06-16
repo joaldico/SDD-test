@@ -13,7 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/",               label: "Dashboard",      icon: "▣" },
   { path: "/conciliacion",   label: "Conciliación",   icon: "⇄" },
   { path: "/historico",      label: "Histórico",      icon: "◷" },
-  { path: "/admin",          label: "Administración", icon: "⚙", comingSoon: true },
+  { path: "/taxonomia",      label: "Taxonomía",      icon: "⚙" },
 ];
 
 export function Sidebar(): JSX.Element {

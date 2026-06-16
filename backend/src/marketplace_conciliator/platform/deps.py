@@ -9,6 +9,12 @@ real JWT-verification dependency when M2 is implemented before M6.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated
+
+from fastapi import Depends, HTTPException
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass(frozen=True)
@@ -34,3 +40,19 @@ def get_current_user() -> CurrentUser:
     (T-2.2) once M2 is implemented.
     """
     return DUMMY_USER
+
+
+def require_role(*allowed_roles: str) -> Callable[..., CurrentUser]:
+    """FastAPI dependency factory — restrict endpoint to given roles (T-5.6 / RF-14)."""
+
+    def _check(
+        current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    ) -> CurrentUser:
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=403,
+                detail="Insufficient permissions for this operation.",
+            )
+        return current_user
+
+    return _check

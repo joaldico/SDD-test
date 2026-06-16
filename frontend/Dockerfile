@@ -1,12 +1,28 @@
 # syntax=docker/dockerfile:1
 # Marketplace Conciliador — Web image (plan 3.8.1)
 #
-# Two stages:
+# Three stages:
+#   dev      — node:22-alpine; Vite dev server with HMR (docker-compose.dev.yml).
 #   builder  — node:22-alpine; installs deps with lockfile, type-checks, and
 #              produces an optimised static bundle via Vite.
 #   runtime  — nginx:alpine; serves the bundle and reverse-proxies /api.
 #
-# The final image contains NO Node.js, no source files, and no node_modules.
+# The runtime image contains NO Node.js, no source files, and no node_modules.
+
+# ── Stage 0: local development (Vite + HMR) ──────────────────────────────────
+FROM node:22-alpine AS dev
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 5173
+
+# --host 0.0.0.0: bind on all interfaces so the port mapping works from the host
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 
 # ── Stage 1: build the React bundle ──────────────────────────────────────────
 FROM node:22-alpine AS builder

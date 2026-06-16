@@ -25,6 +25,7 @@ from sqlalchemy import text as sa_text
 from marketplace_conciliator.reconciliation.error_classifier import (
     ErrorRow,
     classify_and_insert_errors,
+    insert_ignore_into,
 )
 
 if TYPE_CHECKING:
@@ -155,15 +156,16 @@ def _write_run_items_batch(
     run_id: int,
     items: list[RunItemData],
 ) -> None:
-    """Insert all run_items rows using INSERT OR IGNORE for idempotency.
+    """Insert all run_items rows using INSERT IGNORE / OR IGNORE for idempotency.
 
     Named as a standalone function so unit tests can patch it to simulate
     write failures and verify rollback behaviour (T-4.5 DoD).
     """
+    insert_prefix = insert_ignore_into(db)
     for item in items:
         db.execute(
-            sa_text("""
-                INSERT OR IGNORE INTO run_items
+            sa_text(f"""
+                {insert_prefix} run_items
                     (run_id, sku_norm, sku_raw,
                      in_occ, in_feed, in_amazon_report,
                      feed_stock, occ_stock, stock_conflict, sync_status)

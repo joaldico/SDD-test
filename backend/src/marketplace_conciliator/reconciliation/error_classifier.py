@@ -95,11 +95,11 @@ def classify_and_insert_errors(
         message = normalise_error_message(row.error_message)
         affected = row.affected_field or None
 
-        # ── Auto-insert unknown code (INSERT OR IGNORE) ───────────────────
+        # ── Auto-insert unknown code (INSERT IGNORE / OR IGNORE) ──────────
         if code not in known_codes:
             db.execute(
-                sa_text("""
-                    INSERT OR IGNORE INTO error_codes
+                sa_text(f"""
+                    {insert_ignore_into(db)} error_codes
                         (code, family_code, first_seen_at)
                     VALUES
                         (:code, 'SIN_CLASIFICAR', :first_seen_at)
@@ -143,6 +143,16 @@ def classify_and_insert_errors(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def insert_ignore_into(db: Session) -> str:
+    """Return the dialect-correct ``INSERT … IGNORE INTO`` prefix.
+
+    MySQL/MariaDB use ``INSERT IGNORE INTO``; SQLite uses ``INSERT OR IGNORE INTO``.
+    """
+    if db.get_bind().dialect.name.startswith("mysql"):
+        return "INSERT IGNORE INTO"
+    return "INSERT OR IGNORE INTO"
 
 
 def _normalise_category(raw: str) -> str:

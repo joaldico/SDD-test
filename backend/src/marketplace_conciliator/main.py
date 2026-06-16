@@ -37,6 +37,7 @@ from marketplace_conciliator.platform.health import router as health_router
 from marketplace_conciliator.platform.recovery import recover_stale_runs
 from marketplace_conciliator.reconciliation.task_runner import ThreadPoolTaskRunner
 from marketplace_conciliator.reporting.router import router as reporting_router
+from marketplace_conciliator.reporting.taxonomy_router import router as taxonomy_router
 from marketplace_conciliator.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,7 @@ def create_app() -> FastAPI:
     application.include_router(health_router, prefix="/api/v1")
     application.include_router(ingestion_router, prefix="/api/v1")
     application.include_router(reporting_router, prefix="/api/v1")
+    application.include_router(taxonomy_router, prefix="/api/v1")
 
     return application
 

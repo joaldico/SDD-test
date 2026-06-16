@@ -29,6 +29,8 @@ interface Props {
   onProcess: () => Promise<string>;
   /** Called to poll GET /runs/{id}/status. */
   onPollStatus: () => Promise<RunStatusResponse>;
+  /** Called when the user opens the dashboard after completion (T-5.1). */
+  onViewDashboard?: () => void;
   /** Poll interval in ms. Override in tests to speed up. Default: 2000. */
   pollIntervalMs?: number;
 }
@@ -43,6 +45,7 @@ export function Step5Progress({
   runId,
   onProcess,
   onPollStatus,
+  onViewDashboard,
   pollIntervalMs = POLL_INTERVAL_MS,
 }: Props): JSX.Element {
   const [screen, setScreen] = useState<ScreenState>({ kind: "submitting" });
@@ -147,7 +150,13 @@ export function Step5Progress({
   }
 
   if (screen.kind === "completed") {
-    return <CompletedView runId={runId} metrics={screen.metrics} />;
+    return (
+      <CompletedView
+        runId={runId}
+        metrics={screen.metrics}
+        onViewDashboard={onViewDashboard}
+      />
+    );
   }
 
   // polling state
@@ -175,9 +184,11 @@ export function Step5Progress({
 function CompletedView({
   runId,
   metrics,
+  onViewDashboard,
 }: {
   runId: number;
   metrics: SummaryMetrics;
+  onViewDashboard?: () => void;
 }): JSX.Element {
   return (
     <div style={styles.container} data-testid="progress-completed">
@@ -233,8 +244,19 @@ function CompletedView({
       </div>
 
       <p style={styles.nextHint}>
-        Los resultados completos estarán disponibles en el informe de la conciliación.
+        Los resultados completos están disponibles en el informe de la conciliación.
       </p>
+
+      {onViewDashboard ? (
+        <button
+          type="button"
+          style={styles.dashboardButton}
+          onClick={onViewDashboard}
+          data-testid="view-dashboard-button"
+        >
+          Ver informe
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -347,6 +369,17 @@ const styles = {
     fontSize: "var(--font-size-sm)",
     color: "var(--color-text-muted)",
     maxWidth: "480px",
+  },
+  dashboardButton: {
+    marginTop: "16px",
+    padding: "10px 20px",
+    fontSize: "14px",
+    fontWeight: 600,
+    borderRadius: "var(--radius-md)",
+    border: "none",
+    backgroundColor: "var(--color-primary)",
+    color: "#fff",
+    cursor: "pointer",
   },
   // Success
   successIcon: {

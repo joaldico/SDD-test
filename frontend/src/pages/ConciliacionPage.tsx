@@ -18,8 +18,10 @@ import { Step2SheetPicker } from "../components/wizard/steps/Step2SheetPicker";
 import { Step3Mapping } from "../components/wizard/steps/Step3Mapping";
 import { Step4Summary } from "../components/wizard/steps/Step4Summary";
 import { Step5Progress } from "../components/wizard/steps/Step5Progress";
+import { Step6Dashboard } from "../components/wizard/steps/Step6Dashboard";
 import { useWizardState } from "../hooks/useWizardState";
 import * as api from "../api/ingestion";
+import * as reportingApi from "../api/reporting";
 import type { FileRole } from "../types/ingestion";
 
 export function ConciliacionPage(): JSX.Element {
@@ -144,11 +146,20 @@ export function ConciliacionPage(): JSX.Element {
     return api.getRunStatus(state.runId);
   };
 
+  const handleFetchMetrics = async () => {
+    if (state.runId === null) throw new Error("No hay un run activo");
+    return reportingApi.getRunMetrics(state.runId);
+  };
+
+  const handleViewDashboard = (): void => {
+    dispatch({ type: "SET_STEP", step: 6 });
+  };
+
   // ---------------------------------------------------------------------------
   // Navigation helpers
   // ---------------------------------------------------------------------------
 
-  const goTo = (step: 1 | 2 | 3 | 4 | 5) => () =>
+  const goTo = (step: 1 | 2 | 3 | 4 | 5 | 6) => () =>
     dispatch({ type: "SET_STEP", step });
 
   const advanceToStep2 = () => {
@@ -216,6 +227,15 @@ export function ConciliacionPage(): JSX.Element {
             runId={state.runId}
             onProcess={handleTriggerProcess}
             onPollStatus={handlePollStatus}
+            onViewDashboard={handleViewDashboard}
+          />
+        )}
+
+        {state.step === 6 && state.runId !== null && (
+          <Step6Dashboard
+            runId={state.runId}
+            onFetchMetrics={handleFetchMetrics}
+            onBack={goTo(5)}
           />
         )}
       </div>

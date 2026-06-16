@@ -1,8 +1,8 @@
 # 4. Desglose de Tareas (Tasks) — Módulo 1: Conciliador de Errores de Publicación Marketplace
 
 > **Fase SDD:** `4/4 — Task Breakdown`
-> **Estado:** `🔵 En ejecución — Hito M4 en progreso (T-4.4 y T-4.5 completados 2026-06-16)`
-> **Versión:** `1.2.0`
+> **Estado:** `🔵 En ejecución — Hito M5 en progreso (M4 cerrado 2026-06-16; T-4.6 validada en backend y frontend)`
+> **Versión:** `1.3.0`
 > **Última actualización:** 2026-06-16
 > **Trazabilidad:** ejecuta [`3_plan.md`](./3_plan.md) v1.0.0 (🟢 Aprobado), verifica contra [`2_spec.md`](./2_spec.md) v1.1.0 (🟢 Aprobado)
 > **Rol de autoría:** Technical Lead / Scrum Master
@@ -29,14 +29,14 @@
 
 ## 4.2. Hitos (Milestones)
 
-| Hito | Nombre | Objetivo verificable al cierre | Gate BDD |
-|---|---|---|---|
-| **M1** | Fundaciones e Infraestructura | `docker compose up` levanta web+api+mysql con esquema completo y seeds; CI en verde sobre un PR de prueba | — (gate técnico) |
-| **M2** | Autenticación y Shell SaaS | Login/refresh/logout funcionales E2E con rotación y detección de reutilización; layout multi-módulo navegable | — (tests ADR-003) |
-| **M3** | Ingesta y Asistente de Mapeo | Los 3 ficheros reales se cargan, previsualizan y mapean con gate bloqueante | **CA-01, CA-04 verdes** |
-| **M4** | Motor de Conciliación | Pipeline completo asíncrono sobre los ficheros reales con resultados persistidos | **CA-02, CA-03 verdes** |
-| **M5** | Informe, Exportación e Histórico | 3 vistas + export xlsx/csv + histórico de runs | **CA-05 verde** |
-| **M6** | Endurecimiento y Producción | Desplegado en EC2 con seguridad, observabilidad y rendimiento validados; UAT con el cliente | RNF-01/02/04 medidos |
+| Hito | Nombre | Objetivo verificable al cierre | Gate BDD | Estado |
+|---|---|---|---|---|
+| **M1** | Fundaciones e Infraestructura | `docker compose up` levanta web+api+mysql con esquema completo y seeds; CI en verde sobre un PR de prueba | — (gate técnico) | ✅ Cerrado |
+| **M2** | Autenticación y Shell SaaS | Login/refresh/logout funcionales E2E con rotación y detección de reutilización; layout multi-módulo navegable | — (tests ADR-003) | ⏳ Diferido |
+| **M3** | Ingesta y Asistente de Mapeo | Los 3 ficheros reales se cargan, previsualizan y mapean con gate bloqueante | **CA-01, CA-04 verdes** | ✅ Cerrado |
+| **M4** | Motor de Conciliación | Pipeline completo asíncrono sobre los ficheros reales con resultados persistidos | **CA-02, CA-03 verdes** | ✅ **Cerrado** (2026-06-16) |
+| **M5** | Dashboard y Reportes (Informe, Exportación e Histórico) | 3 vistas + export xlsx/csv + histórico de runs | **CA-05 verde** | 🔵 **En progreso** |
+| **M6** | Endurecimiento y Producción | Desplegado en EC2 con seguridad, observabilidad y rendimiento validados; UAT con el cliente | RNF-01/02/04 medidos | ⏳ Pendiente |
 
 Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente secuenciales; M2 puede solaparse con el final de M1 solo en frontend).
 
@@ -88,10 +88,12 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-3.9 | ✅ | Frontend: **wizard de mapeo pasos 1–4** (carga triple, selección de hoja, mapeo con previsualización y sugerencias marcadas, resumen) con gate bloqueante del botón Procesar | spec 2.9, RNF-08 | T-3.7, T-2.5 | L | Test E2E: flujo completo con los 3 fixtures; botón Procesar deshabilitado hasta mapeo completo (RNF-08) |
 | T-3.10 | ✅ | **Gate del hito:** suite BDD CA-01 completa (3 escenarios) implementada con pytest-bdd sobre la API real | CA-01 | T-3.8 | S | **CA-01 y CA-04 100% verdes en CI**; los Gherkin del spec se ejecutan literalmente, sin reescritura |
 
-### M4 — Motor de Conciliación (gate: CA-02 y CA-03 verdes)
+### M4 — Motor de Conciliación (gate: CA-02 y CA-03 verdes) ✅ **CERRADO** (2026-06-16)
 
-| ID | Tarea | Traza a | Dep. | Est. | DoD específico |
-|---|---|---|---|---|---|
+> **Gate superado:** CA-02 y CA-03 verdes; pipeline asíncrono completo (T-4.1→T-4.6); `POST /process` (202/409) + `GET /status` con polling en frontend paso 5. Hito formalmente cerrado tras validación de T-4.6 en backend y frontend.
+
+| ID | Estado | Tarea | Traza a | Dep. | Est. | DoD específico |
+|---|---|---|---|---|---|---|
 | T-4.1 | ✅ | Puerto **`TaskRunner`** + adaptador BackgroundTasks/ThreadPool: semáforo (máx. 2), estado de fases en MySQL, recuperación al arranque (`processing` → `failed: restart_during_processing`) | ADR-002, RF-06 | M3 | M | Tests: el event loop responde `/health` durante un job pesado simulado; 3er job concurrente espera; reinicio simulado marca la run como `failed` con causa |
 | T-4.2 | ✅ | Etapa **Deduplicación** según política spec 2.6: idénticas→colapso, Libro1→primera, feed→`MAX(stock)`+`stock_conflict`, errores 1:N exentos; persistencia en `duplicate_findings` | spec 2.6, RF-05, OBJ-08 | T-4.1 | M | **BDD CA-03 verde** (4 escenarios, incluido "nunca se suma" y "1:N no es duplicado") |
 | T-4.3 | ✅ | Etapa **Cruce de 3 vías**: outer-join sobre `sku_norm`, asignación de `sync_status` (5 estados spec 2.7), flags `in_occ/in_feed/in_amazon_report`, stocks con signo | spec 2.7, RF-06, OBJ-07 | T-4.2 | M | **BDD CA-02 verde** (escenario parametrizado de clasificación + cruce insensible a suciedad NBSP/case); cruce de los fixtures reproduce los números medidos: 524 enviados, 708 `NOT_SENT`, 62 `DESYNC_FEED_ONLY` |
@@ -99,16 +101,18 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-4.5 | ✅ | Etapa **Persistencia por lotes** transaccional (`run_items` + `item_errors`) + `summary_metrics` JSON + transición `completed` | RF-10, plan 3.4 | T-4.4 | M | Test: fallo a mitad de escritura → rollback completo, run `failed`, sin filas huérfanas; run completa de fixtures persiste 4.094+ items en < 30 s (pre-validación RNF-02) |
 | T-4.6 | ✅ | Endpoints `POST /runs/{id}/process` (202 / 409 por gate) y `GET /runs/{id}/status` (fase, progreso, conteos) + frontend paso 5 (pantalla de progreso con polling) | RF-06, plan 3.5/3.7 | T-4.5, T-3.9 | M | **Backend**: TDD verde — `TestGetRunStatus`, `TestTriggerProcessGate`, `TestTriggerProcess202`, `TestPollingIntegration` + BDD CA-02/CA-03 compatibles con `_SyncTaskRunner`. **Frontend**: `Step5Progress` con polling cada 2 s, stepper de fases, métricas de cierre; 43/43 tests verdes (vitest). |
 
-### M5 — Informe, Exportación e Histórico (gate: CA-05 verde)
+### M5 — Dashboard y Reportes: Informe, Exportación e Histórico (gate: CA-05 verde) 🔵 **En progreso**
 
-| ID | Tarea | Traza a | Dep. | Est. | DoD específico |
-|---|---|---|---|---|---|
-| T-5.1 | Endpoint **Vista 1** `GET .../report/families` (agregado por familia con drill-down a códigos y de ahí a SKUs) | RF-08, RF-14 | M4 | M | Test contra run de fixtures: familia `AUTORIZACION_MARCA` agrega 18299+18749+…; familia vacía no aparece; `SIN_CLASIFICAR` visible con aviso si tiene contenido |
-| T-5.2 | Endpoints **Vista 2** `sku-detail` (filtros family/code/sync_status, paginación) y **Vista 3** `catalog-health` (desync orden `stock DESC`, not_sent, duplicates) | RF-08, OBJ-07/08 | T-5.1 | M | Tests: orden por stock desc verificado; paginación estable; filtros combinables |
-| T-5.3 | **Exportación** `GET .../export?format=xlsx|csv`: libro con 3 pestañas replicando las vistas | RF-09 | T-5.2 | M | **BDD CA-05 verde completo** (incluido el escenario de exportación); xlsx de fixtures abre con 3 pestañas y conteos correctos |
-| T-5.4 | Frontend: **dashboard de informe en 3 tabs** con drill-down familia→código→SKUs y botones de export | RF-08, spec 2.1 | T-5.3 | L | E2E: flujo completo upload→mapeo→proceso→informe→descarga sobre fixtures reales |
-| T-5.5 | **Histórico**: `GET /runs` paginado + reapertura de informe de runs pasadas + **mapeo recordado** por huella de cabeceras ofrecido como predeterminado | RF-12, RF-13 | T-5.4 | M | Tests: segunda run con mismos ficheros pre-rellena el mapeo (marcado como sugerencia, sigue exigiendo confirmación — OBJ-03); informe de run antigua accesible |
-| T-5.6 | **Admin de taxonomía**: `GET /error-families`, `PATCH /error-codes/{code}` (reasignar familia, solo `admin`) + UI mínima | RF-14, EB-10 | T-5.5 | S | Tests: `operator` → 403; reasignación se refleja en la Vista 1 de la siguiente consulta sin redespliegue |
+> **Inicio:** 2026-06-16. Próxima tarea en cola: **T-5.1** (Vista 1 — agregado por familia).
+
+| ID | Estado | Tarea | Traza a | Dep. | Est. | DoD específico |
+|---|---|---|---|---|---|---|
+| T-5.1 | 🔵 | Endpoint **Vista 1** `GET .../report/families` (agregado por familia con drill-down a códigos y de ahí a SKUs) | RF-08, RF-14 | M4 | M | Test contra run de fixtures: familia `AUTORIZACION_MARCA` agrega 18299+18749+…; familia vacía no aparece; `SIN_CLASIFICAR` visible con aviso si tiene contenido |
+| T-5.2 | ⏳ | Endpoints **Vista 2** `sku-detail` (filtros family/code/sync_status, paginación) y **Vista 3** `catalog-health` (desync orden `stock DESC`, not_sent, duplicates) | RF-08, OBJ-07/08 | T-5.1 | M | Tests: orden por stock desc verificado; paginación estable; filtros combinables |
+| T-5.3 | ⏳ | **Exportación** `GET .../export?format=xlsx|csv`: libro con 3 pestañas replicando las vistas | RF-09 | T-5.2 | M | **BDD CA-05 verde completo** (incluido el escenario de exportación); xlsx de fixtures abre con 3 pestañas y conteos correctos |
+| T-5.4 | ⏳ | Frontend: **dashboard de informe en 3 tabs** con drill-down familia→código→SKUs y botones de export | RF-08, spec 2.1 | T-5.3 | L | E2E: flujo completo upload→mapeo→proceso→informe→descarga sobre fixtures reales |
+| T-5.5 | ⏳ | **Histórico**: `GET /runs` paginado + reapertura de informe de runs pasadas + **mapeo recordado** por huella de cabeceras ofrecido como predeterminado | RF-12, RF-13 | T-5.4 | M | Tests: segunda run con mismos ficheros pre-rellena el mapeo (marcado como sugerencia, sigue exigiendo confirmación — OBJ-03); informe de run antigua accesible |
+| T-5.6 | ⏳ | **Admin de taxonomía**: `GET /error-families`, `PATCH /error-codes/{code}` (reasignar familia, solo `admin`) + UI mínima | RF-14, EB-10 | T-5.5 | S | Tests: `operator` → 403; reasignación se refleja en la Vista 1 de la siguiente consulta sin redespliegue |
 
 ### M6 — Endurecimiento y Producción
 
@@ -132,10 +136,10 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | RF-04 (normalización SKU) | CA-02, CA-03 | RN-01..06 / `ingestion` | T-3.1 | ✅ M3 |
 | RF-05 (duplicados) | CA-03 | `reconciliation` / política 2.6 | T-4.2 | ✅ M4 |
 | RF-06 (conciliación asíncrona) | CA-02 | `TaskRunner` (ADR-002) | T-4.1, T-4.3, T-4.6 | ✅ M4 |
-| RF-07 (errores 1:N) | CA-02 | `reconciliation` / `item_errors` | T-4.4 | ⏳ |
+| RF-07 (errores 1:N) | CA-02 | `reconciliation` / `item_errors` | T-4.4 | ✅ M4 |
 | RF-08 (informe 3 vistas) | CA-02, CA-05 | `reporting` / contratos 3.7 | T-5.1, T-5.2, T-5.4 | ⏳ |
 | RF-09 (exportación) | CA-05 | `reporting` | T-5.3 | ⏳ |
-| RF-10 (persistencia íntegra) | — | modelo físico 3.6 | T-1.6, T-1.7, T-4.5 | ⏳ |
+| RF-10 (persistencia íntegra) | — | modelo físico 3.6 | T-1.6, T-1.7, T-4.5 | ✅ M4 |
 | RF-11 (JWT) | — | ADR-003 | T-2.1..T-2.5 | ⏳ |
 | RF-12 (mapeo recordado) | — | `mapping` | T-5.5 | ⏳ |
 | RF-13 (histórico) | — | `reporting` | T-5.5 | ⏳ |

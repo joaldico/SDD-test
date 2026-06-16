@@ -9,22 +9,24 @@ import { FamilyErrorsTable } from "./FamilyErrorsTable";
 import { MetricsBreakdownPanel } from "./MetricsBreakdownPanel";
 import { SummaryMetricCard } from "./SummaryMetricCard";
 import type {
+  CatalogHealthQuery,
   CatalogHealthResponse,
   ExportFormat,
   FamiliesReportResponse,
   RunMetricsResponse,
-  SkuDetailItem,
+  SkuDetailResponse,
 } from "../../types/reporting";
 
 interface Props {
   runId: number;
   metrics: RunMetricsResponse;
   families: FamiliesReportResponse;
-  catalog: CatalogHealthResponse;
+  onFetchCatalog: (query: CatalogHealthQuery) => Promise<CatalogHealthResponse>;
   onFetchSkusForCode: (
     familyCode: string,
     errorCode: string,
-  ) => Promise<SkuDetailItem[]>;
+    page?: number,
+  ) => Promise<SkuDetailResponse>;
   onExport: (format: ExportFormat) => Promise<void>;
 }
 
@@ -32,7 +34,7 @@ export function RunDashboardLayout({
   runId,
   metrics,
   families,
-  catalog,
+  onFetchCatalog,
   onFetchSkusForCode,
   onExport,
 }: Props): JSX.Element {
@@ -126,7 +128,7 @@ export function RunDashboardLayout({
 
       <DashboardTabs
         panels={{
-          catalog: <CatalogHealthTable catalog={catalog} />,
+          catalog: <CatalogHealthTable onFetchCatalog={onFetchCatalog} />,
           families: (
             <FamilyErrorsTable
               report={families}

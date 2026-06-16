@@ -27,7 +27,12 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from marketplace_conciliator.ingestion.router import get_db, get_staging_dir
+from marketplace_conciliator.ingestion.router import (
+    get_db,
+    get_db_factory,
+    get_staging_dir,
+    get_task_runner,
+)
 from marketplace_conciliator.main import create_app
 from marketplace_conciliator.platform.deps import DUMMY_USER
 
@@ -221,12 +226,30 @@ def _get_test_db() -> Generator[Session, None, None]:
 # ---------------------------------------------------------------------------
 
 
+class _SyncTaskRunner:
+    """Executes work_fn synchronously — pipeline results visible before assertions."""
+
+    def submit(self, run_id: int, work_fn: Any) -> None:  # noqa: ANN401
+        work_fn(run_id)
+
+    def active_count(self) -> int:
+        return 0
+
+    def shutdown(self, *, wait: bool = True) -> None:  # noqa: ARG002
+        pass
+
+
+_sync_runner = _SyncTaskRunner()
+
+
 @pytest.fixture(scope="module")
 def bdd_client() -> TestClient:
     """Single TestClient reused across all BDD scenarios in this module."""
     app = create_app()
     app.dependency_overrides[get_db] = _get_test_db
     app.dependency_overrides[get_staging_dir] = lambda: _STAGING
+    app.dependency_overrides[get_task_runner] = lambda: _sync_runner
+    app.dependency_overrides[get_db_factory] = lambda: _SessionLocal
     return TestClient(app)
 
 

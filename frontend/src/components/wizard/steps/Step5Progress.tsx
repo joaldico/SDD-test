@@ -50,7 +50,8 @@ export function Step5Progress({
 }: Props): JSX.Element {
   const [screen, setScreen] = useState<ScreenState>({ kind: "submitting" });
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasStarted = useRef(false);
+  /** Tracks which runId already received POST /process (survives Strict Mode remount). */
+  const processedRunRef = useRef<number | null>(null);
 
   const stopPolling = () => {
     if (pollingRef.current !== null) {
@@ -60,34 +61,20 @@ export function Step5Progress({
   };
 
   useEffect(() => {
-    if (hasStarted.current) return;
-    hasStarted.current = true;
-
     let cancelled = false;
 
-    const start = async () => {
-      try {
-        await onProcess();
-      } catch (err) {
-        if (!cancelled) {
-          const msg = err instanceof Error ? err.message : "Error al iniciar el proceso";
-          setScreen({ kind: "failed", reason: msg });
-        }
+    const pollOnce = async () => {
+      if (cancelled) {
+        stopPolling();
         return;
       }
-
-      if (cancelled) return;
-      setScreen({ kind: "polling", phase: null });
-
-      pollingRef.current = setInterval(async () => {  // eslint-disable-line @typescript-eslint/no-misused-promises
-        if (cancelled) {
+      try {
+        const status = await onPollStatus();
+        if (status.status === "completed") {
           stopPolling();
-          return;
-        }
-        try {
-          const status = await onPollStatus();
-          if (status.status === "completed") {
-            stopPolling();
+          if (onViewDashboard) {
+            onViewDashboard();
+          } else {
             setScreen({
               kind: "completed",
               metrics: status.summary_metrics ?? {
@@ -100,18 +87,43 @@ export function Step5Progress({
                 total_errors: 0,
               },
             });
-          } else if (status.status === "failed") {
-            stopPolling();
-            setScreen({
-              kind: "failed",
-              reason: status.failure_reason ?? "Error desconocido en el pipeline",
-            });
-          } else {
-            setScreen({ kind: "polling", phase: status.phase });
           }
-        } catch {
-          // network errors during poll — keep polling (transient)
+        } else if (status.status === "failed") {
+          stopPolling();
+          setScreen({
+            kind: "failed",
+            reason: status.failure_reason ?? "Error desconocido en el pipeline",
+          });
+        } else {
+          setScreen({ kind: "polling", phase: status.phase });
         }
+      } catch {
+        // network errors during poll — keep polling (transient)
+      }
+    };
+
+    const start = async () => {
+      if (processedRunRef.current !== runId) {
+        try {
+          await onProcess();
+          processedRunRef.current = runId;
+        } catch (err) {
+          if (!cancelled) {
+            const msg = err instanceof Error ? err.message : "Error al iniciar el proceso";
+            setScreen({ kind: "failed", reason: msg });
+          }
+          return;
+        }
+      }
+
+      if (cancelled) return;
+      setScreen({ kind: "polling", phase: null });
+
+      await pollOnce();
+      if (cancelled) return;
+
+      pollingRef.current = setInterval(() => {
+        void pollOnce();
       }, pollIntervalMs);
     };
 
@@ -121,7 +133,7 @@ export function Step5Progress({
       cancelled = true;
       stopPolling();
     };
-  }, [pollIntervalMs]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runId, pollIntervalMs, onProcess, onPollStatus, onViewDashboard]);
 
   // ---------------------------------------------------------------------------
   // Render

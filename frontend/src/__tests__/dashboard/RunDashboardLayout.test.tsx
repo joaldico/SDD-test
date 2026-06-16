@@ -10,7 +10,7 @@ import type {
   CatalogHealthResponse,
   FamiliesReportResponse,
   RunMetricsResponse,
-  SkuDetailItem,
+  SkuDetailResponse,
 } from "../../types/reporting";
 
 const sampleMetrics: RunMetricsResponse = {
@@ -81,20 +81,29 @@ const sampleCatalog: CatalogHealthResponse = {
   ],
 };
 
-const sampleSkus: SkuDetailItem[] = [
-  {
-    sku_raw: "TWA85XL",
-    sku_norm: "TWA85XL",
-    error_code: "18299",
-    error_category: "ERROR",
-    error_message: "Marca no autorizada",
-    affected_field: "brand",
-  },
-];
+const sampleSkus: SkuDetailResponse = {
+  run_id: 42,
+  family_code: "AUTORIZACION_MARCA",
+  error_code: "18299",
+  total: 1,
+  page: 1,
+  page_size: 50,
+  items: [
+    {
+      sku_raw: "TWA85XL",
+      sku_norm: "TWA85XL",
+      error_code: "18299",
+      error_category: "ERROR",
+      error_message: "Marca no autorizada",
+      affected_field: "brand",
+    },
+  ],
+};
 
 describe("RunDashboardLayout", () => {
   it("renders KPI cards, export buttons and tabbed report views", async () => {
     const user = userEvent.setup();
+    const onFetchCatalog = vi.fn().mockResolvedValue(sampleCatalog);
     const onFetchSkusForCode = vi.fn().mockResolvedValue(sampleSkus);
     const onExport = vi.fn().mockResolvedValue(undefined);
 
@@ -103,11 +112,16 @@ describe("RunDashboardLayout", () => {
         runId={42}
         metrics={sampleMetrics}
         families={sampleFamilies}
-        catalog={sampleCatalog}
+        onFetchCatalog={onFetchCatalog}
         onFetchSkusForCode={onFetchSkusForCode}
         onExport={onExport}
       />,
     );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-table")).toBeInTheDocument();
+    });
+    expect(onFetchCatalog).toHaveBeenCalledWith({ page: 1, page_size: 50 });
 
     expect(screen.getByTestId("run-dashboard")).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-total-skus")).toHaveTextContent("4,094");
@@ -132,7 +146,7 @@ describe("RunDashboardLayout", () => {
 
     await user.click(screen.getByRole("button", { name: /18299/ }));
     await waitFor(() => {
-      expect(onFetchSkusForCode).toHaveBeenCalledWith("AUTORIZACION_MARCA", "18299");
+      expect(onFetchSkusForCode).toHaveBeenCalledWith("AUTORIZACION_MARCA", "18299", 1);
     });
     expect(screen.getByTestId("sku-list-AUTORIZACION_MARCA-18299")).toHaveTextContent(
       "TWA85XL",

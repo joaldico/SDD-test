@@ -18,19 +18,21 @@ export function RunReportPage(): JSX.Element {
     [runId],
   );
   const onFetchCatalog = useCallback(
-    () => reportingApi.getCatalogHealth(runId, { page: 1, page_size: 50 }),
+    (query: { page?: number; page_size?: number } = {}) =>
+      reportingApi.getCatalogHealth(runId, {
+        page: query.page ?? 1,
+        page_size: query.page_size ?? 50,
+      }),
     [runId],
   );
   const onFetchSkusForCode = useCallback(
-    (familyCode: string, errorCode: string) =>
-      reportingApi
-        .getSkuDetail(runId, {
-          family: familyCode,
-          code: errorCode,
-          page: 1,
-          page_size: 100,
-        })
-        .then((response) => response.items),
+    (familyCode: string, errorCode: string, page = 1) =>
+      reportingApi.getSkuDetail(runId, {
+        family: familyCode,
+        code: errorCode,
+        page,
+        page_size: 50,
+      }),
     [runId],
   );
   const onExport = useCallback(

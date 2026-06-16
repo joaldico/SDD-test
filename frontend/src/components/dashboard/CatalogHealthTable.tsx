@@ -2,11 +2,19 @@
  * CatalogHealthTable — Detalle del Catálogo (T-5.2 Vista 3).
  */
 
-import type { JSX } from "react";
-import type { CatalogHealthResponse } from "../../types/reporting";
+import { useEffect, useState, type JSX } from "react";
+import type {
+  CatalogHealthQuery,
+  CatalogHealthResponse,
+} from "../../types/reporting";
+import {
+  REPORT_PAGE_SIZE,
+  TablePagination,
+  totalPagesFromCount,
+} from "./TablePagination";
 
 interface Props {
-  catalog: CatalogHealthResponse;
+  onFetchCatalog: (query: CatalogHealthQuery) => Promise<CatalogHealthResponse>;
 }
 
 const SYNC_LABELS: Record<string, string> = {
@@ -19,67 +27,134 @@ const SYNC_LABELS: Record<string, string> = {
 
 const numberFmt = new Intl.NumberFormat("es-ES");
 
-export function CatalogHealthTable({ catalog }: Props): JSX.Element {
+export function CatalogHealthTable({ onFetchCatalog }: Props): JSX.Element {
+  const [page, setPage] = useState(1);
+  const [catalog, setCatalog] = useState<CatalogHealthResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await onFetchCatalog({ page, page_size: REPORT_PAGE_SIZE });
+        if (!cancelled) {
+          setCatalog(data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error ? err.message : "No se pudo cargar el catálogo";
+          setError(message);
+          setCatalog(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onFetchCatalog, page]);
+
+  const totalPages = catalog
+    ? totalPagesFromCount(catalog.total, catalog.page_size)
+    : 1;
+
   return (
     <section aria-label="Detalle del Catálogo" style={styles.section}>
       <div style={styles.headerRow}>
         <h3 style={styles.heading}>Detalle del Catálogo</h3>
-        <span style={styles.meta} data-testid="catalog-total">
-          {numberFmt.format(catalog.total)} SKUs · priorizados por estado, conflictos y stock
-        </span>
+        {catalog ? (
+          <span style={styles.meta} data-testid="catalog-total">
+            {numberFmt.format(catalog.total)} SKUs · priorizados por estado, conflictos y stock
+          </span>
+        ) : null}
       </div>
 
-      {catalog.items.length === 0 ? (
+      {loading ? (
+        <p style={styles.muted} data-testid="catalog-loading">
+          Cargando catálogo…
+        </p>
+      ) : null}
+
+      {error ? (
+        <p style={styles.error} role="alert" data-testid="catalog-error">
+          {error}
+        </p>
+      ) : null}
+
+      {!loading && !error && catalog && catalog.items.length === 0 ? (
         <p style={styles.empty} data-testid="catalog-empty">
           No hay SKUs que mostrar con los filtros actuales.
         </p>
-      ) : (
-        <div style={styles.tableWrap}>
-          <table style={styles.table} data-testid="catalog-table">
-            <thead>
-              <tr>
-                <th style={styles.th}>SKU</th>
-                <th style={styles.th}>Estado</th>
-                <th style={styles.thRight}>Stock feed</th>
-                <th style={styles.thRight}>Stock OCC</th>
-                <th style={styles.th}>Conflictos</th>
-              </tr>
-            </thead>
-            <tbody>
-              {catalog.items.map((item) => (
-                <tr
-                  key={item.sku_norm}
-                  data-testid={`catalog-row-${item.sku_norm}`}
-                >
-                  <td style={styles.td}>
-                    <span style={styles.sku}>{item.sku_raw}</span>
-                  </td>
-                  <td style={styles.td}>
-                    <span style={styles.badge(item.sync_status)}>
-                      {SYNC_LABELS[item.sync_status] ?? item.sync_status}
-                    </span>
-                  </td>
-                  <td style={styles.tdRight}>
-                    {item.feed_stock ?? "—"}
-                  </td>
-                  <td style={styles.tdRight}>
-                    {item.occ_stock ?? "—"}
-                  </td>
-                  <td style={styles.td}>
-                    {item.stock_conflict ? (
-                      <span style={styles.conflictBadge} data-testid="stock-conflict-badge">
-                        Conflicto de stock
-                      </span>
-                    ) : (
-                      <span style={styles.muted}>—</span>
-                    )}
-                  </td>
+      ) : null}
+
+      {!loading && !error && catalog && catalog.items.length > 0 ? (
+        <>
+          <div style={styles.tableWrap}>
+            <table style={styles.table} data-testid="catalog-table">
+              <thead>
+                <tr>
+                  <th style={styles.th}>SKU</th>
+                  <th style={styles.th}>Estado</th>
+                  <th style={styles.thRight}>Stock feed</th>
+                  <th style={styles.thRight}>Stock OCC</th>
+                  <th style={styles.th}>Conflictos</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {catalog.items.map((item) => (
+                  <tr
+                    key={item.sku_norm}
+                    data-testid={`catalog-row-${item.sku_norm}`}
+                  >
+                    <td style={styles.td}>
+                      <span style={styles.sku}>{item.sku_raw}</span>
+                    </td>
+                    <td style={styles.td}>
+                      <span style={styles.badge(item.sync_status)}>
+                        {SYNC_LABELS[item.sync_status] ?? item.sync_status}
+                      </span>
+                    </td>
+                    <td style={styles.tdRight}>
+                      {item.feed_stock ?? "—"}
+                    </td>
+                    <td style={styles.tdRight}>
+                      {item.occ_stock ?? "—"}
+                    </td>
+                    <td style={styles.td}>
+                      {item.stock_conflict ? (
+                        <span style={styles.conflictBadge} data-testid="stock-conflict-badge">
+                          Conflicto de stock
+                        </span>
+                      ) : (
+                        <span style={styles.muted}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            onPrevious={() => setPage((current) => Math.max(1, current - 1))}
+            onNext={() => setPage((current) => Math.min(totalPages, current + 1))}
+            testId="catalog-pagination"
+          />
+        </>
+      ) : null}
     </section>
   );
 }
@@ -111,6 +186,16 @@ const styles = {
     margin: 0,
     fontSize: "13px",
     color: "var(--color-text-muted)",
+  },
+  muted: {
+    margin: 0,
+    fontSize: "13px",
+    color: "var(--color-text-muted)",
+  },
+  error: {
+    margin: 0,
+    fontSize: "13px",
+    color: "#dc2626",
   },
   tableWrap: {
     overflowX: "auto" as const,
@@ -178,8 +263,5 @@ const styles = {
     fontWeight: 600,
     backgroundColor: "#ede9fe",
     color: "#5b21b6",
-  },
-  muted: {
-    color: "var(--color-text-muted)",
   },
 } as const;

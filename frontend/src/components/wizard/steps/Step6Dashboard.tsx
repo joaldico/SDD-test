@@ -7,22 +7,24 @@
 import { useEffect, useState, type JSX } from "react";
 import { RunDashboardLayout } from "../../dashboard/RunDashboardLayout";
 import type {
+  CatalogHealthQuery,
   CatalogHealthResponse,
   ExportFormat,
   FamiliesReportResponse,
   RunMetricsResponse,
-  SkuDetailItem,
+  SkuDetailResponse,
 } from "../../../types/reporting";
 
 interface Props {
   runId: number;
   onFetchMetrics: () => Promise<RunMetricsResponse>;
   onFetchFamilies: () => Promise<FamiliesReportResponse>;
-  onFetchCatalog: () => Promise<CatalogHealthResponse>;
+  onFetchCatalog: (query: CatalogHealthQuery) => Promise<CatalogHealthResponse>;
   onFetchSkusForCode: (
     familyCode: string,
     errorCode: string,
-  ) => Promise<SkuDetailItem[]>;
+    page?: number,
+  ) => Promise<SkuDetailResponse>;
   onExport: (format: ExportFormat) => Promise<void>;
   onBack?: () => void;
 }
@@ -33,7 +35,6 @@ type ScreenState =
       kind: "ready";
       metrics: RunMetricsResponse;
       families: FamiliesReportResponse;
-      catalog: CatalogHealthResponse;
     }
   | { kind: "error"; message: string };
 
@@ -53,13 +54,12 @@ export function Step6Dashboard({
 
     const load = async () => {
       try {
-        const [metrics, families, catalog] = await Promise.all([
+        const [metrics, families] = await Promise.all([
           onFetchMetrics(),
           onFetchFamilies(),
-          onFetchCatalog(),
         ]);
         if (!cancelled) {
-          setScreen({ kind: "ready", metrics, families, catalog });
+          setScreen({ kind: "ready", metrics, families });
         }
       } catch (err) {
         if (!cancelled) {
@@ -75,7 +75,7 @@ export function Step6Dashboard({
     return () => {
       cancelled = true;
     };
-  }, [onFetchMetrics, onFetchFamilies, onFetchCatalog]);
+  }, [onFetchMetrics, onFetchFamilies]);
 
   if (screen.kind === "loading") {
     return (
@@ -105,7 +105,7 @@ export function Step6Dashboard({
         runId={runId}
         metrics={screen.metrics}
         families={screen.families}
-        catalog={screen.catalog}
+        onFetchCatalog={onFetchCatalog}
         onFetchSkusForCode={onFetchSkusForCode}
         onExport={onExport}
       />

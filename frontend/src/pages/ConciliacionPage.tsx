@@ -157,20 +157,26 @@ export function ConciliacionPage(): JSX.Element {
     return reportingApi.getFamiliesReport(state.runId);
   };
 
-  const handleFetchCatalog = async () => {
+  const handleFetchCatalog = async (query: { page?: number; page_size?: number } = {}) => {
     if (state.runId === null) throw new Error("No hay un run activo");
-    return reportingApi.getCatalogHealth(state.runId, { page: 1, page_size: 50 });
+    return reportingApi.getCatalogHealth(state.runId, {
+      page: query.page ?? 1,
+      page_size: query.page_size ?? 50,
+    });
   };
 
-  const handleFetchSkusForCode = async (familyCode: string, errorCode: string) => {
+  const handleFetchSkusForCode = async (
+    familyCode: string,
+    errorCode: string,
+    page = 1,
+  ) => {
     if (state.runId === null) throw new Error("No hay un run activo");
-    const response = await reportingApi.getSkuDetail(state.runId, {
+    return reportingApi.getSkuDetail(state.runId, {
       family: familyCode,
       code: errorCode,
-      page: 1,
-      page_size: 100,
+      page,
+      page_size: 50,
     });
-    return response.items;
   };
 
   const handleExportReport = async (format: "xlsx" | "csv") => {

@@ -113,6 +113,7 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-5.4 | [x] | Frontend: **dashboard de informe en 3 tabs** con drill-down familia→código→SKUs y botones de export | RF-08, spec 2.1 | T-5.3 | L | E2E: flujo completo upload→mapeo→proceso→informe→descarga sobre fixtures reales |
 | T-5.5 | [x] | **Histórico**: `GET /runs` paginado + reapertura de informe de runs pasadas + **mapeo recordado** por huella de cabeceras ofrecido como predeterminado | RF-12, RF-13 | T-5.4 | M | Tests: segunda run con mismos ficheros pre-rellena el mapeo (marcado como sugerencia, sigue exigiendo confirmación — OBJ-03); informe de run antigua accesible |
 | T-5.6 | [x] | **Admin de taxonomía**: `GET /error-families`, `PATCH /error-codes/{code}` (reasignar familia, solo `admin`) + UI mínima | RF-14, EB-10 | T-5.5 | S | Tests: `operator` → 403; reasignación se refleja en la Vista 1 de la siguiente consulta sin redespliegue |
+| T-5.7 | [x] | **Hotfix técnico y estabilización:** Helper dinámico de dialectos SQL implementado; resolución de entorno `DATABASE_URL` en tests; corrección de transición de UI (Paso 5 a Paso 6). | T-5.6 | S | 317 tests en verde; transición UI automática al completar. |
 
 ### M6 — Endurecimiento y Producción
 

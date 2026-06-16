@@ -43,7 +43,15 @@ const sampleCatalog: CatalogHealthResponse = {
   items: [],
 };
 
-const noopSkus = vi.fn().mockResolvedValue([]);
+const noopSkus = vi.fn().mockResolvedValue({
+  run_id: 7,
+  family_code: null,
+  error_code: null,
+  items: [],
+  total: 0,
+  page: 1,
+  page_size: 50,
+});
 const noopExport = vi.fn().mockResolvedValue(undefined);
 
 describe("Step6Dashboard", () => {
@@ -88,7 +96,9 @@ describe("Step6Dashboard", () => {
 
     expect(onFetchMetrics).toHaveBeenCalledOnce();
     expect(onFetchFamilies).toHaveBeenCalledOnce();
-    expect(onFetchCatalog).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(onFetchCatalog).toHaveBeenCalledWith({ page: 1, page_size: 50 });
+    });
     expect(screen.getByTestId("dashboard-total-skus")).toHaveTextContent("120");
     expect(screen.getByTestId("dashboard-tab-catalog")).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-tab-families")).toBeInTheDocument();

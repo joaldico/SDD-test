@@ -17,7 +17,12 @@ def test_settings_default_debug_is_false() -> None:
 
 def test_settings_default_database_url_is_empty() -> None:
     """database_url is empty until T-1.4 wires the real MySQL connection string."""
-    assert Settings().database_url == ""
+    saved = os.environ.pop("DATABASE_URL", None)
+    try:
+        assert Settings().database_url == ""
+    finally:
+        if saved is not None:
+            os.environ["DATABASE_URL"] = saved
 
 
 def test_settings_override_via_env() -> None:

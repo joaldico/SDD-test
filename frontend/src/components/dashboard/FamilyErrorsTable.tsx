@@ -2,18 +2,24 @@
  * FamilyErrorsTable — Errores por Familia with familia→código→SKU drill-down (T-5.2 / T-5.4).
  */
 
-import { Fragment, useState, type JSX } from "react";
+import { Fragment, useEffect, useState, type JSX } from "react";
 import type {
   FamiliesReportResponse,
-  SkuDetailItem,
+  SkuDetailResponse,
 } from "../../types/reporting";
+import {
+  REPORT_PAGE_SIZE,
+  TablePagination,
+  totalPagesFromCount,
+} from "./TablePagination";
 
 interface Props {
   report: FamiliesReportResponse;
   onFetchSkusForCode: (
     familyCode: string,
     errorCode: string,
-  ) => Promise<SkuDetailItem[]>;
+    page?: number,
+  ) => Promise<SkuDetailResponse>;
 }
 
 const numberFmt = new Intl.NumberFormat("es-ES");
@@ -22,14 +28,42 @@ export function FamilyErrorsTable({
   report,
   onFetchSkusForCode,
 }: Props): JSX.Element {
+  const [familyPage, setFamilyPage] = useState(1);
   const [expandedFamily, setExpandedFamily] = useState<string | null>(null);
   const [expandedCode, setExpandedCode] = useState<string | null>(null);
-  const [skuCache, setSkuCache] = useState<Record<string, SkuDetailItem[]>>({});
+  const [skuCache, setSkuCache] = useState<Record<string, SkuDetailResponse>>({});
+  const [skuPageByCode, setSkuPageByCode] = useState<Record<string, number>>({});
   const [loadingCode, setLoadingCode] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const cacheKey = (familyCode: string, errorCode: string): string =>
     `${familyCode}:${errorCode}`;
+
+  const skuCacheKey = (
+    familyCode: string,
+    errorCode: string,
+    page: number,
+  ): string => `${cacheKey(familyCode, errorCode)}:p${page}`;
+
+  const familyTotalPages = totalPagesFromCount(
+    report.families.length,
+    REPORT_PAGE_SIZE,
+  );
+  const familyOffset = (familyPage - 1) * REPORT_PAGE_SIZE;
+  const paginatedFamilies = report.families.slice(
+    familyOffset,
+    familyOffset + REPORT_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setExpandedFamily(null);
+    setExpandedCode(null);
+    setLoadError(null);
+  }, [familyPage]);
+
+  const handleFamilyPageChange = (nextPage: number): void => {
+    setFamilyPage(nextPage);
+  };
 
   const handleFamilyToggle = (familyCode: string): void => {
     if (expandedFamily === familyCode) {
@@ -42,25 +76,19 @@ export function FamilyErrorsTable({
     setLoadError(null);
   };
 
-  const handleCodeToggle = async (
+  const loadSkus = async (
     familyCode: string,
     errorCode: string,
+    page: number,
   ): Promise<void> => {
-    const key = cacheKey(familyCode, errorCode);
-    if (expandedCode === key) {
-      setExpandedCode(null);
-      return;
-    }
-
-    setExpandedCode(key);
+    const key = skuCacheKey(familyCode, errorCode, page);
+    setLoadingCode(key);
     setLoadError(null);
 
-    if (skuCache[key]) return;
-
-    setLoadingCode(key);
     try {
-      const items = await onFetchSkusForCode(familyCode, errorCode);
-      setSkuCache((prev) => ({ ...prev, [key]: items }));
+      const response = await onFetchSkusForCode(familyCode, errorCode, page);
+      setSkuCache((prev) => ({ ...prev, [key]: response }));
+      setSkuPageByCode((prev) => ({ ...prev, [cacheKey(familyCode, errorCode)]: page }));
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "No se pudieron cargar los SKUs";
@@ -68,6 +96,40 @@ export function FamilyErrorsTable({
     } finally {
       setLoadingCode(null);
     }
+  };
+
+  const handleCodeToggle = async (
+    familyCode: string,
+    errorCode: string,
+  ): Promise<void> => {
+    const codeKey = cacheKey(familyCode, errorCode);
+    if (expandedCode === codeKey) {
+      setExpandedCode(null);
+      return;
+    }
+
+    setExpandedCode(codeKey);
+    setLoadError(null);
+
+    const page = skuPageByCode[codeKey] ?? 1;
+    const cached = skuCache[skuCacheKey(familyCode, errorCode, page)];
+    if (cached) return;
+
+    await loadSkus(familyCode, errorCode, page);
+  };
+
+  const handleSkuPageChange = async (
+    familyCode: string,
+    errorCode: string,
+    nextPage: number,
+  ): Promise<void> => {
+    const codeKey = cacheKey(familyCode, errorCode);
+    setSkuPageByCode((prev) => ({ ...prev, [codeKey]: nextPage }));
+
+    const cached = skuCache[skuCacheKey(familyCode, errorCode, nextPage)];
+    if (cached) return;
+
+    await loadSkus(familyCode, errorCode, nextPage);
   };
 
   return (
@@ -90,164 +152,213 @@ export function FamilyErrorsTable({
           No se encontraron errores clasificados en esta conciliación.
         </p>
       ) : (
-        <div style={styles.tableWrap}>
-          <table style={styles.table} data-testid="families-table">
-            <thead>
-              <tr>
-                <th style={styles.th}>Familia</th>
-                <th style={styles.thRight}>SKUs únicos</th>
-                <th style={styles.thRight}>Errores</th>
-                <th style={styles.th}>Códigos</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.families.map((family) => {
-                const isFamilyOpen = expandedFamily === family.code;
-                return (
-                  <Fragment key={family.code}>
-                    <tr data-testid={`family-row-${family.code}`}>
-                      <td style={styles.td}>
-                        <button
-                          type="button"
-                          style={styles.familyButton}
-                          aria-expanded={isFamilyOpen}
-                          onClick={() => handleFamilyToggle(family.code)}
-                        >
-                          {isFamilyOpen ? "▾" : "▸"} {family.display_name}
-                        </button>
-                      </td>
-                      <td style={styles.tdRight}>
-                        {numberFmt.format(family.unique_skus)}
-                      </td>
-                      <td style={styles.tdRight}>
-                        {numberFmt.format(family.total_errors)}
-                      </td>
-                      <td style={styles.td}>
-                        <span style={styles.codeSummary}>
-                          {family.codes.length}{" "}
-                          {family.codes.length === 1 ? "código" : "códigos"}
-                        </span>
-                      </td>
-                    </tr>
-
-                    {isFamilyOpen ? (
-                      <tr>
-                        <td colSpan={4} style={styles.detailCell}>
-                          <div
-                            style={styles.codePanel}
-                            data-testid={`family-codes-${family.code}`}
+        <>
+          <div style={styles.tableWrap}>
+            <table style={styles.table} data-testid="families-table">
+              <thead>
+                <tr>
+                  <th style={styles.th}>Familia</th>
+                  <th style={styles.thRight}>SKUs únicos</th>
+                  <th style={styles.thRight}>Errores</th>
+                  <th style={styles.th}>Códigos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedFamilies.map((family) => {
+                  const isFamilyOpen = expandedFamily === family.code;
+                  return (
+                    <Fragment key={family.code}>
+                      <tr data-testid={`family-row-${family.code}`}>
+                        <td style={styles.td}>
+                          <button
+                            type="button"
+                            style={styles.familyButton}
+                            aria-expanded={isFamilyOpen}
+                            onClick={() => handleFamilyToggle(family.code)}
                           >
-                            <table style={styles.innerTable}>
-                              <thead>
-                                <tr>
-                                  <th style={styles.innerTh}>Código</th>
-                                  <th style={styles.innerTh}>Mensaje</th>
-                                  <th style={styles.innerThRight}>Errores</th>
-                                  <th style={styles.innerTh}>SKUs</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {family.codes.map((codeRow) => {
-                                  const key = cacheKey(family.code, codeRow.code);
-                                  const isCodeOpen = expandedCode === key;
-                                  const skus = skuCache[key] ?? [];
-                                  const isLoading = loadingCode === key;
+                            {isFamilyOpen ? "▾" : "▸"} {family.display_name}
+                          </button>
+                        </td>
+                        <td style={styles.tdRight}>
+                          {numberFmt.format(family.unique_skus)}
+                        </td>
+                        <td style={styles.tdRight}>
+                          {numberFmt.format(family.total_errors)}
+                        </td>
+                        <td style={styles.td}>
+                          <span style={styles.codeSummary}>
+                            {family.codes.length}{" "}
+                            {family.codes.length === 1 ? "código" : "códigos"}
+                          </span>
+                        </td>
+                      </tr>
 
-                                  return (
-                                    <Fragment key={codeRow.code}>
-                                      <tr
-                                        data-testid={`code-row-${family.code}-${codeRow.code}`}
-                                      >
-                                        <td style={styles.innerTd}>
-                                          <button
-                                            type="button"
-                                            style={styles.codeButton}
-                                            aria-expanded={isCodeOpen}
-                                            onClick={() =>
-                                              void handleCodeToggle(
-                                                family.code,
-                                                codeRow.code,
-                                              )
-                                            }
-                                          >
-                                            {isCodeOpen ? "▾" : "▸"}{" "}
-                                            <strong>{codeRow.code}</strong>
-                                          </button>
-                                        </td>
-                                        <td style={styles.innerTd}>{codeRow.message}</td>
-                                        <td style={styles.innerTdRight}>
-                                          {numberFmt.format(codeRow.count)}
-                                        </td>
-                                        <td style={styles.innerTd}>
-                                          {isLoading ? (
-                                            <span style={styles.muted}>Cargando…</span>
-                                          ) : isCodeOpen ? (
-                                            <span style={styles.muted}>
-                                              {skus.length} SKU
-                                              {skus.length === 1 ? "" : "s"}
-                                            </span>
-                                          ) : (
-                                            <span style={styles.muted}>Ver SKUs</span>
-                                          )}
-                                        </td>
-                                      </tr>
+                      {isFamilyOpen ? (
+                        <tr>
+                          <td colSpan={4} style={styles.detailCell}>
+                            <div
+                              style={styles.codePanel}
+                              data-testid={`family-codes-${family.code}`}
+                            >
+                              <table style={styles.innerTable}>
+                                <thead>
+                                  <tr>
+                                    <th style={styles.innerTh}>Código</th>
+                                    <th style={styles.innerTh}>Mensaje</th>
+                                    <th style={styles.innerThRight}>Errores</th>
+                                    <th style={styles.innerTh}>SKUs</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {family.codes.map((codeRow) => {
+                                    const codeKey = cacheKey(family.code, codeRow.code);
+                                    const isCodeOpen = expandedCode === codeKey;
+                                    const skuPage = skuPageByCode[codeKey] ?? 1;
+                                    const skuResponse =
+                                      skuCache[skuCacheKey(family.code, codeRow.code, skuPage)];
+                                    const skus = skuResponse?.items ?? [];
+                                    const skuTotalPages = skuResponse
+                                      ? totalPagesFromCount(
+                                          skuResponse.total,
+                                          skuResponse.page_size,
+                                        )
+                                      : 1;
+                                    const isLoading =
+                                      loadingCode ===
+                                      skuCacheKey(family.code, codeRow.code, skuPage);
 
-                                      {isCodeOpen ? (
-                                        <tr>
-                                          <td colSpan={4} style={styles.skuCell}>
-                                            {loadError && expandedCode === key ? (
-                                              <p style={styles.errorText}>{loadError}</p>
-                                            ) : isLoading ? (
-                                              <p
-                                                style={styles.muted}
-                                                data-testid={`sku-loading-${family.code}-${codeRow.code}`}
-                                              >
-                                                Cargando SKUs afectados…
-                                              </p>
-                                            ) : skus.length === 0 ? (
-                                              <p
-                                                style={styles.muted}
-                                                data-testid={`sku-empty-${family.code}-${codeRow.code}`}
-                                              >
-                                                No hay SKUs para este código.
-                                              </p>
+                                    return (
+                                      <Fragment key={codeRow.code}>
+                                        <tr
+                                          data-testid={`code-row-${family.code}-${codeRow.code}`}
+                                        >
+                                          <td style={styles.innerTd}>
+                                            <button
+                                              type="button"
+                                              style={styles.codeButton}
+                                              aria-expanded={isCodeOpen}
+                                              onClick={() =>
+                                                void handleCodeToggle(
+                                                  family.code,
+                                                  codeRow.code,
+                                                )
+                                              }
+                                            >
+                                              {isCodeOpen ? "▾" : "▸"}{" "}
+                                              <strong>{codeRow.code}</strong>
+                                            </button>
+                                          </td>
+                                          <td style={styles.innerTd}>{codeRow.message}</td>
+                                          <td style={styles.innerTdRight}>
+                                            {numberFmt.format(codeRow.count)}
+                                          </td>
+                                          <td style={styles.innerTd}>
+                                            {isLoading ? (
+                                              <span style={styles.muted}>Cargando…</span>
+                                            ) : isCodeOpen && skuResponse ? (
+                                              <span style={styles.muted}>
+                                                {numberFmt.format(skuResponse.total)} SKU
+                                                {skuResponse.total === 1 ? "" : "s"}
+                                              </span>
                                             ) : (
-                                              <ul
-                                                style={styles.skuList}
-                                                data-testid={`sku-list-${family.code}-${codeRow.code}`}
-                                              >
-                                                {skus.map((sku) => (
-                                                  <li
-                                                    key={`${sku.sku_norm}-${sku.error_code}`}
-                                                    data-testid={`sku-item-${sku.sku_norm}`}
-                                                  >
-                                                    <span style={styles.skuCode}>
-                                                      {sku.sku_raw}
-                                                    </span>
-                                                    {" — "}
-                                                    {sku.error_message}
-                                                  </li>
-                                                ))}
-                                              </ul>
+                                              <span style={styles.muted}>Ver SKUs</span>
                                             )}
                                           </td>
                                         </tr>
-                                      ) : null}
-                                    </Fragment>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+
+                                        {isCodeOpen ? (
+                                          <tr>
+                                            <td colSpan={4} style={styles.skuCell}>
+                                              {loadError && expandedCode === codeKey ? (
+                                                <p style={styles.errorText}>{loadError}</p>
+                                              ) : isLoading ? (
+                                                <p
+                                                  style={styles.muted}
+                                                  data-testid={`sku-loading-${family.code}-${codeRow.code}`}
+                                                >
+                                                  Cargando SKUs afectados…
+                                                </p>
+                                              ) : skuResponse && skus.length === 0 ? (
+                                                <p
+                                                  style={styles.muted}
+                                                  data-testid={`sku-empty-${family.code}-${codeRow.code}`}
+                                                >
+                                                  No hay SKUs para este código.
+                                                </p>
+                                              ) : skuResponse ? (
+                                                <>
+                                                  <ul
+                                                    style={styles.skuList}
+                                                    data-testid={`sku-list-${family.code}-${codeRow.code}`}
+                                                  >
+                                                    {skus.map((sku) => (
+                                                      <li
+                                                        key={`${sku.sku_norm}-${sku.error_code}`}
+                                                        data-testid={`sku-item-${sku.sku_norm}`}
+                                                      >
+                                                        <span style={styles.skuCode}>
+                                                          {sku.sku_raw}
+                                                        </span>
+                                                        {" — "}
+                                                        {sku.error_message}
+                                                      </li>
+                                                    ))}
+                                                  </ul>
+                                                  <TablePagination
+                                                    page={skuPage}
+                                                    totalPages={skuTotalPages}
+                                                    onPrevious={() =>
+                                                      void handleSkuPageChange(
+                                                        family.code,
+                                                        codeRow.code,
+                                                        Math.max(1, skuPage - 1),
+                                                      )
+                                                    }
+                                                    onNext={() =>
+                                                      void handleSkuPageChange(
+                                                        family.code,
+                                                        codeRow.code,
+                                                        Math.min(
+                                                          skuTotalPages,
+                                                          skuPage + 1,
+                                                        ),
+                                                      )
+                                                    }
+                                                    testId={`sku-pagination-${family.code}-${codeRow.code}`}
+                                                  />
+                                                </>
+                                              ) : null}
+                                            </td>
+                                          </tr>
+                                        ) : null}
+                                      </Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <TablePagination
+            page={familyPage}
+            totalPages={familyTotalPages}
+            onPrevious={() =>
+              handleFamilyPageChange(Math.max(1, familyPage - 1))
+            }
+            onNext={() =>
+              handleFamilyPageChange(Math.min(familyTotalPages, familyPage + 1))
+            }
+            testId="families-pagination"
+          />
+        </>
       )}
     </section>
   );

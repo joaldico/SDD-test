@@ -97,7 +97,7 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | T-4.3 | ✅ | Etapa **Cruce de 3 vías**: outer-join sobre `sku_norm`, asignación de `sync_status` (5 estados spec 2.7), flags `in_occ/in_feed/in_amazon_report`, stocks con signo | spec 2.7, RF-06, OBJ-07 | T-4.2 | M | **BDD CA-02 verde** (escenario parametrizado de clasificación + cruce insensible a suciedad NBSP/case); cruce de los fixtures reproduce los números medidos: 524 enviados, 708 `NOT_SENT`, 62 `DESYNC_FEED_ONLY` |
 | T-4.4 | ✅ | Etapa **Errores y familias**: join 1:N de errores por SKU, clasificación por `error_codes.family_code`, **alta automática de códigos desconocidos en `SIN_CLASIFICAR`** con `first_seen_at` | spec 2.8, RF-07, RF-14, EB-10 | T-4.3 | M | Tests: `S01098S3MRN` conserva 11 errores; código `99999` inyectado → alta en catálogo + familia `SIN_CLASIFICAR`; NBSP normalizado en mensajes |
 | T-4.5 | ✅ | Etapa **Persistencia por lotes** transaccional (`run_items` + `item_errors`) + `summary_metrics` JSON + transición `completed` | RF-10, plan 3.4 | T-4.4 | M | Test: fallo a mitad de escritura → rollback completo, run `failed`, sin filas huérfanas; run completa de fixtures persiste 4.094+ items en < 30 s (pre-validación RNF-02) |
-| T-4.6 | Endpoints `POST /runs/{id}/process` (202 / 409 por gate) y `GET /runs/{id}/status` (fase, progreso, conteos) + frontend paso 5 (pantalla de progreso con polling) | RF-06, plan 3.5/3.7 | T-4.5, T-3.9 | M | Test de integración del flujo 202→polling→completed; E2E: barra de progreso refleja las fases del pipeline 3.4 |
+| T-4.6 | ✅ | Endpoints `POST /runs/{id}/process` (202 / 409 por gate) y `GET /runs/{id}/status` (fase, progreso, conteos) + frontend paso 5 (pantalla de progreso con polling) | RF-06, plan 3.5/3.7 | T-4.5, T-3.9 | M | **Backend**: TDD verde — `TestGetRunStatus`, `TestTriggerProcessGate`, `TestTriggerProcess202`, `TestPollingIntegration` + BDD CA-02/CA-03 compatibles con `_SyncTaskRunner`. **Frontend**: `Step5Progress` con polling cada 2 s, stepper de fases, métricas de cierre; 43/43 tests verdes (vitest). |
 
 ### M5 — Informe, Exportación e Histórico (gate: CA-05 verde)
 
@@ -131,7 +131,7 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 | RF-03 (mapeo confirmado bloqueante) | CA-01, CA-04 | `mapping` / preview 3.7 | T-3.5, T-3.7, T-3.8, T-3.9 | ✅ M3 |
 | RF-04 (normalización SKU) | CA-02, CA-03 | RN-01..06 / `ingestion` | T-3.1 | ✅ M3 |
 | RF-05 (duplicados) | CA-03 | `reconciliation` / política 2.6 | T-4.2 | ✅ M4 |
-| RF-06 (conciliación asíncrona) | CA-02 | `TaskRunner` (ADR-002) | T-4.1, T-4.3, T-4.6 | ⏳ |
+| RF-06 (conciliación asíncrona) | CA-02 | `TaskRunner` (ADR-002) | T-4.1, T-4.3, T-4.6 | ✅ M4 |
 | RF-07 (errores 1:N) | CA-02 | `reconciliation` / `item_errors` | T-4.4 | ⏳ |
 | RF-08 (informe 3 vistas) | CA-02, CA-05 | `reporting` / contratos 3.7 | T-5.1, T-5.2, T-5.4 | ⏳ |
 | RF-09 (exportación) | CA-05 | `reporting` | T-5.3 | ⏳ |

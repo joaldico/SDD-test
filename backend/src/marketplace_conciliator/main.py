@@ -22,7 +22,15 @@ if TYPE_CHECKING:
 
 from fastapi import FastAPI
 
-from marketplace_conciliator.ingestion.router import router as ingestion_router
+from marketplace_conciliator.ingestion.router import (
+    get_db_factory as _router_get_db_factory,
+)
+from marketplace_conciliator.ingestion.router import (
+    get_task_runner as _router_get_task_runner,
+)
+from marketplace_conciliator.ingestion.router import (
+    router as ingestion_router,
+)
 from marketplace_conciliator.platform.db.models.runs import ReconciliationRun
 from marketplace_conciliator.platform.db.session import get_session_factory
 from marketplace_conciliator.platform.health import router as health_router
@@ -134,6 +142,10 @@ def create_app() -> FastAPI:
 
     Called by tests (which may override dependencies before use) and by the
     module-level ``app`` singleton used by Uvicorn.
+
+    Wires the production TaskRunner and session factory into the ingestion router
+    via ``dependency_overrides`` (ADR-001 / ADR-002 composition root responsibility).
+    Tests override these stubs with test-specific implementations.
     """
     application = FastAPI(
         title="Marketplace Conciliator API",
@@ -147,6 +159,10 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
+
+    # ── Wire TaskRunner + DB factory into the ingestion router (T-4.6) ──────
+    application.dependency_overrides[_router_get_task_runner] = get_task_runner
+    application.dependency_overrides[_router_get_db_factory] = get_session_factory
 
     application.include_router(health_router, prefix="/api/v1")
     application.include_router(ingestion_router, prefix="/api/v1")

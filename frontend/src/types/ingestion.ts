@@ -117,3 +117,36 @@ export interface MappingResponse {
   status: "ok" | "warnings";
   warnings: MappingWarning[];
 }
+
+// ---------------------------------------------------------------------------
+// Process / Status (T-4.6)
+// ---------------------------------------------------------------------------
+
+export interface ProcessResponse {
+  status_url: string;
+}
+
+export type RunStatusValue =
+  | "uploaded"
+  | "mapping"
+  | "processing"
+  | "completed"
+  | "failed";
+
+export interface SummaryMetrics {
+  total_skus: number;
+  sent_with_error: number;
+  sent_ok: number;
+  not_sent: number;
+  desync_feed_only: number;
+  desync_amazon_only: number;
+  total_errors: number;
+}
+
+/** Response for GET /runs/{id}/status — ADR-002 polling contract */
+export interface RunStatusResponse {
+  status: RunStatusValue;
+  phase: string | null;
+  failure_reason: string | null;
+  summary_metrics: SummaryMetrics | null;
+}

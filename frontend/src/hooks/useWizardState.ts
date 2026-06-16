@@ -45,7 +45,7 @@ export interface FileWizardState {
 // ---------------------------------------------------------------------------
 
 export interface WizardState {
-  step: 1 | 2 | 3 | 4;
+  step: 1 | 2 | 3 | 4 | 5;
   runId: number | null;
   files: Record<FileRole, FileWizardState>;
 }
@@ -55,7 +55,7 @@ export interface WizardState {
 // ---------------------------------------------------------------------------
 
 export type WizardAction =
-  | { type: "SET_STEP"; step: 1 | 2 | 3 | 4 }
+  | { type: "SET_STEP"; step: 1 | 2 | 3 | 4 | 5 }
   | { type: "SET_RUN_ID"; runId: number }
   | { type: "FILE_SELECTED"; role: FileRole; file: File }
   | { type: "FILE_UPLOADING"; role: FileRole }
@@ -227,6 +227,9 @@ export interface UseWizardStateReturn {
   /** File roles whose uploaded file is an Excel type (need sheet selection) */
   excelRoles: FileRole[];
 }
+
+/** goTo helper: navigate wizard step */
+export type GoToStep = (step: 1 | 2 | 3 | 4 | 5) => () => void;
 
 const ALL_ROLES: FileRole[] = ["occ_top", "wm_feed", "amazon_report"];
 const EXCEL_EXTS = [".xlsx", ".xlsm", ".xltx", ".xltm"];

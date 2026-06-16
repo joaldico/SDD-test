@@ -63,3 +63,8 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+/* T-4.6 — Spinner animation for Step5Progress */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

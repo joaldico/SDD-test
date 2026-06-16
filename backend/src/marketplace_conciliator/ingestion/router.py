@@ -1,13 +1,17 @@
 """Ingestion API router — T-3.6/T-3.7/T-3.8/T-3.10 (gate CA-01) + T-4.2 (gate CA-03).
 
+T-4.6: async process endpoint (ADR-002 TaskRunner) + status polling endpoint.
+
 Deduplication (spec 2.6) and ``duplicate_findings`` persistence added in T-4.2.
+Async pipeline via TaskRunner (ADR-002) and status polling added in T-4.6.
 
 Endpoints:
   POST /api/v1/runs                              Create a new reconciliation run.
   POST /api/v1/runs/{run_id}/files               Upload a source file (+ save to staging).
   GET  /api/v1/runs/{run_id}/files/{file_id}/preview   Parse & preview a staged file.
   PUT  /api/v1/runs/{run_id}/files/{file_id}/mapping   Confirm column mapping.
-  POST /api/v1/runs/{run_id}/process             Trigger reconciliation (gate RNF-08).
+  POST /api/v1/runs/{run_id}/process             Trigger reconciliation (gate RNF-08) → 202.
+  GET  /api/v1/runs/{run_id}/status              Poll pipeline phase + summary_metrics.
 
 Auth: uses the dummy ``get_current_user`` dependency (M2 bypass — see platform/deps.py).
 DB:   uses the synchronous ``get_db`` session dependency (overridable in tests).
@@ -19,10 +23,12 @@ mapping endpoints can re-parse the same file without a second upload (RNF-05, T-
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+from collections.abc import Callable  # noqa: TC003
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import openpyxl
 import pandas as pd
@@ -52,9 +58,39 @@ from marketplace_conciliator.platform.db.session import get_db
 from marketplace_conciliator.platform.deps import CurrentUser, get_current_user
 from marketplace_conciliator.reconciliation.error_classifier import ErrorRow
 from marketplace_conciliator.reconciliation.persistence import RunItemData, persist_run_results
+from marketplace_conciliator.reconciliation.ports import TaskRunnerPort  # noqa: TC001
 from marketplace_conciliator.settings import get_settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/runs", tags=["ingestion"])
+
+
+# ---------------------------------------------------------------------------
+# Overridable dependencies — TaskRunner + DB factory (T-4.6, ADR-002)
+# ---------------------------------------------------------------------------
+
+
+def get_task_runner() -> TaskRunnerPort:
+    """FastAPI dependency — returns the process-level TaskRunner.
+
+    This stub is overridden by ``main.py`` (production wiring) and by tests
+    (``_NoOpTaskRunner`` or ``_SyncTaskRunner``) via ``app.dependency_overrides``.
+    """
+    msg = "TaskRunner not wired — override get_task_runner in create_app() or test setup."
+    raise RuntimeError(msg)  # pragma: no cover
+
+
+def get_db_factory() -> Callable[[], Session]:
+    """FastAPI dependency — returns a callable that creates a new DB session.
+
+    Background work functions (running in the ThreadPool) must create their own
+    sessions independently of the request lifecycle.  This dependency is
+    overridden in tests to provide the in-memory SQLite session factory.
+    """
+    from marketplace_conciliator.platform.db.session import get_session_factory  # noqa: PLC0415
+
+    return get_session_factory()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -545,6 +581,57 @@ class ProcessResponse(BaseModel):
     status_url: str
 
 
+class RunStatusResponse(BaseModel):
+    """Response body for GET /runs/{run_id}/status (ADR-002 polling contract)."""
+
+    status: str
+    phase: str | None
+    failure_reason: str | None
+    summary_metrics: dict[str, Any] | None
+
+
+# ---------------------------------------------------------------------------
+# Endpoint — T-4.6: GET /runs/{run_id}/status (polling, ADR-002)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{run_id}/status",
+    response_model=RunStatusResponse,
+    summary="Poll the pipeline phase and summary metrics for a run (T-4.6)",
+)
+def get_run_status(
+    run_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> RunStatusResponse:
+    """Return current status, pipeline phase, failure_reason, and summary_metrics.
+
+    Used by the frontend polling loop (every 2 s) to track pipeline progress
+    from 'processing' through to 'completed' or 'failed' (plan 3.5, ADR-002).
+    """
+    run = db.get(ReconciliationRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
+
+    metrics: dict[str, Any] | None = None
+    if run.summary_metrics is not None:
+        # summary_metrics is stored as JSON; SQLAlchemy deserialises to dict for MySQL,
+        # but SQLite tests store it as a raw JSON string — handle both.
+        if isinstance(run.summary_metrics, str):
+            import json  # noqa: PLC0415
+
+            metrics = json.loads(run.summary_metrics)
+        else:
+            metrics = run.summary_metrics
+
+    return RunStatusResponse(
+        status=run.status,
+        phase=run.phase,
+        failure_reason=run.failure_reason,
+        summary_metrics=metrics,
+    )
+
+
 # Logical field names for Amazon error columns (used by deduplicator)
 _AMAZON_ERROR_KEY_FIELDS: tuple[str, ...] = (
     "error_code",
@@ -563,31 +650,27 @@ _AFFECTED_FIELD_HINTS: tuple[str, ...] = ("campo", "affected", "affected_field")
     "/{run_id}/process",
     status_code=202,
     response_model=ProcessResponse,
-    summary="Trigger reconciliation processing for a run (gate RNF-08 / CA-01 / CA-03)",
+    summary="Trigger async reconciliation processing (gate RNF-08, ADR-002, T-4.6)",
 )
-def trigger_process(  # noqa: C901, PLR0912, PLR0915
+def trigger_process(  # noqa: PLR0913
     run_id: int,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],  # noqa: ARG001
     db: Annotated[Session, Depends(get_db)],
     staging_dir: Annotated[Path, Depends(get_staging_dir)],
+    task_runner: Annotated[TaskRunnerPort, Depends(get_task_runner)],
+    db_factory: Annotated[Callable[[], Session], Depends(get_db_factory)],
 ) -> ProcessResponse:
-    """Gate check (RNF-08) + deduplication pipeline (spec 2.6, T-4.2).
+    """Gate check (RNF-08) → 409 if mapping incomplete, 202 + enqueue otherwise.
 
-    Returns 409 if any of the 3 required files is missing its SKU mapping.
+    On success (202, ADR-002):
+      1.  Verifies all 3 required files have a confirmed SKU mapping (gate).
+      2.  Transitions run status to 'processing' and commits immediately.
+      3.  Submits the full reconciliation pipeline to the TaskRunner.
+          The caller receives 202 before the pipeline starts.
+      4.  The frontend polls GET /runs/{id}/status every 2 s until completed.
 
-    On success (202):
-      1.  Loads all 3 source DataFrames using confirmed column mappings.
-      2.  Applies per-role deduplication policy (spec 2.6).
-      3.  Persists ``duplicate_findings`` records for every resolved group.
-      4.  Upserts ``run_items`` with proper flags and stock data.
-      5.  Inserts ``item_errors`` for Amazon report error rows (respects
-          the 1:N cardinality — different errors for same SKU are NOT dupes).
-      6.  Auto-inserts unknown Amazon error codes into ``error_codes`` with
-          family ``SIN_CLASIFICAR`` (T-4.4 pattern, EB-10).
-
-    NOTE: Full 3-way cross-join (T-4.3) and async execution (T-4.6) extend
-    this inline implementation in subsequent milestones.  The gate logic
-    (409 contract) and the 202 response do NOT change (ADR-002).
+    Pipeline stages (run inside the TaskRunner thread):
+      Validando → Normalizando → Deduplicando → Cruzando → Persistiendo → Listo
     """
     run = db.get(ReconciliationRun, run_id)
     if run is None:
@@ -626,190 +709,235 @@ def trigger_process(  # noqa: C901, PLR0912, PLR0915
                 ),
             )
 
-    # Gate passed — begin processing
+    # Gate passed: transition to processing and commit before returning 202.
     run.status = "processing"
     db.commit()
 
-    # ── Phase 1: load DataFrames + resolve column names from mappings ────────
-    # run_items accumulator: sku_norm → merged data across all 3 files
-    run_item_data: dict[str, _RunItemAccum] = {}
-    # error rows per sku_norm (for amazon_report)
-    amazon_error_rows: list[dict[str, object]] = []
+    # Capture staging_dir in the closure (Path is immutable — safe to share).
+    _staging = staging_dir
 
-    for role, source_file in file_by_role.items():
-        all_mappings: dict[str, ColumnMapping] = {
-            cm.logical_field: cm
-            for cm in db.query(ColumnMapping)
-            .filter(ColumnMapping.source_file_id == source_file.id)
-            .all()
-        }
+    def _work_fn(rid: int) -> None:
+        """Full reconciliation pipeline — executes in a ThreadPool worker thread."""
+        _execute_pipeline(rid, db_factory, _staging)
 
-        sku_mapping = all_mappings.get("sku")
-        if sku_mapping is None:
-            continue  # defensive — already validated above
-
-        ext = Path(source_file.original_filename).suffix.lower()
-        staging_path = staging_dir / f"{source_file.id}{ext}"
-        if not staging_path.exists():
-            continue
-
-        df = _load_dataframe(source_file, staging_path)
-        if sku_mapping.source_column_index >= len(df.columns):
-            continue
-
-        sku_col = str(df.columns[sku_mapping.source_column_index])
-
-        # ── Deduplication per role (spec 2.6) ────────────────────────────────
-        if role == "occ_top":
-            dedup_result = deduplicate_occ(df, sku_col)
-            stock_mapping = all_mappings.get("stock")
-            stock_col_name = (
-                str(df.columns[stock_mapping.source_column_index])
-                if stock_mapping and stock_mapping.source_column_index < len(df.columns)
-                else None
-            )
-            _persist_findings(db, source_file.id, dedup_result.findings)
-            for _, row in dedup_result.dataframe.iterrows():
-                raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
-                norm = normalise_sku(raw_str)
-                if not norm.is_valid or norm.value is None:
-                    continue
-                sku_n = norm.value
-                occ_stock: int | None = None
-                if stock_col_name and stock_col_name in row.index:
-                    occ_stock = _safe_int(row[stock_col_name])
-                accum = run_item_data.setdefault(
-                    sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
-                )
-                accum.in_occ = True
-                if occ_stock is not None:
-                    accum.occ_stock = occ_stock
-                if not accum.sku_raw:
-                    accum.sku_raw = raw_str
-
-        elif role == "wm_feed":
-            stock_mapping = all_mappings.get("stock")
-            stock_col_name = (
-                str(df.columns[stock_mapping.source_column_index])
-                if stock_mapping and stock_mapping.source_column_index < len(df.columns)
-                else None
-            )
-            dedup_result = deduplicate_feed(df, sku_col, stock_col_name)
-            _persist_findings(db, source_file.id, dedup_result.findings)
-            for _, row in dedup_result.dataframe.iterrows():
-                raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
-                norm = normalise_sku(raw_str)
-                if not norm.is_valid or norm.value is None:
-                    continue
-                sku_n = norm.value
-                feed_stock: int | None = None
-                if stock_col_name and stock_col_name in row.index:
-                    feed_stock = _safe_int(row[stock_col_name])
-                accum = run_item_data.setdefault(
-                    sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
-                )
-                accum.in_feed = True
-                if feed_stock is not None:
-                    accum.feed_stock = feed_stock
-                if sku_n in dedup_result.stock_conflicts:
-                    accum.stock_conflict = True
-                if not accum.sku_raw:
-                    accum.sku_raw = raw_str
-
-        elif role == "amazon_report":
-            # Resolve error key columns — prefer confirmed mappings, then heuristic
-            error_col_names = _resolve_amazon_error_cols(df, all_mappings)
-            dedup_result = deduplicate_amazon_errors(
-                df, sku_col, error_col_names.error_key_cols,
-            )
-            _persist_findings(db, source_file.id, dedup_result.findings)
-            for _, row in dedup_result.dataframe.iterrows():
-                raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
-                norm = normalise_sku(raw_str)
-                if not norm.is_valid or norm.value is None:
-                    continue
-                sku_n = norm.value
-                accum = run_item_data.setdefault(
-                    sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
-                )
-                accum.in_amazon = True
-                if not accum.sku_raw:
-                    accum.sku_raw = raw_str
-                # Collect error row for item_errors insertion (T-4.2/T-4.4).
-                # Skip rows with an empty error_code: the SKU is still counted as
-                # in_amazon_report (= sent to Amazon) but has no error — SENT_OK.
-                raw_error_code = str(
-                    row.get(error_col_names.error_code_col, "") or "",
-                ).strip()
-                if not raw_error_code:
-                    continue
-                amazon_error_rows.append({
-                    "sku_norm": sku_n,
-                    "error_code": raw_error_code,
-                    "error_category": str(
-                        row.get(error_col_names.error_category_col, "ERROR") or "ERROR",
-                    ),
-                    "error_message": str(
-                        row.get(error_col_names.error_message_col, "") or "",
-                    ),
-                    "affected_field": str(
-                        row.get(error_col_names.affected_field_col, "") or "",
-                    ) or None,
-                })
-
-    db.flush()  # flush duplicate_findings before building run items
-
-    # ── Phase 2: 3-way cross-join + sync_status assignment (T-4.3, spec 2.7) ─
-    # Precompute which SKUs have at least one error in the Amazon report.
-    # SKUs in the error block but with an empty error_code were already excluded
-    # from amazon_error_rows, so they correctly resolve to SENT_OK (has_errors=False).
-    skus_with_errors: set[str] = {str(row["sku_norm"]) for row in amazon_error_rows}
-
-    # Build error_rows grouped by sku_norm for the persistence layer
-    errors_by_sku: dict[str, list[ErrorRow]] = {}
-    for err_dict in amazon_error_rows:
-        sku_n = str(err_dict["sku_norm"])
-        errors_by_sku.setdefault(sku_n, []).append(
-            ErrorRow(
-                sku_norm=sku_n,
-                error_code=str(err_dict["error_code"] or "UNKNOWN"),
-                error_category=str(err_dict["error_category"] or "ERROR"),
-                error_message=str(err_dict["error_message"] or ""),
-                affected_field=str(err_dict["affected_field"]) if err_dict.get("affected_field") else None,
-            ),
-        )
-
-    # Build RunItemData list from the accumulator
-    run_items_data: list[RunItemData] = []
-    for sku_n, accum in run_item_data.items():
-        sync_status = _compute_sync_status(
-            _in_occ=accum.in_occ,
-            in_feed=accum.in_feed,
-            in_amazon=accum.in_amazon,
-            has_errors=sku_n in skus_with_errors,
-        )
-        run_items_data.append(
-            RunItemData(
-                sku_norm=sku_n,
-                sku_raw=accum.sku_raw,
-                in_occ=accum.in_occ,
-                in_feed=accum.in_feed,
-                in_amazon_report=accum.in_amazon,
-                sync_status=sync_status,
-                feed_stock=accum.feed_stock,
-                occ_stock=accum.occ_stock,
-                stock_conflict=accum.stock_conflict,
-                error_rows=errors_by_sku.get(sku_n, []),
-            ),
-        )
-
-    # ── Phase 3: transactional batch persistence (T-4.5) ────────────────────
-    # persist_run_results handles run_items + item_errors atomically, computes
-    # summary_metrics, and transitions the run to 'completed'. On failure it
-    # rolls back the batch, marks the run 'failed', and re-raises.
-    persist_run_results(db, run_id, run_items_data)
+    task_runner.submit(run_id, _work_fn)
 
     return ProcessResponse(status_url=f"/api/v1/runs/{run_id}/status")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline execution — T-4.6 (extracted from trigger_process for async use)
+# ---------------------------------------------------------------------------
+
+
+def _update_phase(db: Session, run_id: int, phase: str) -> None:
+    """Write the pipeline phase to reconciliation_runs for polling visibility."""
+    try:
+        db.execute(
+            sa_text("UPDATE reconciliation_runs SET phase = :phase WHERE id = :id"),
+            {"phase": phase, "id": run_id},
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning("_update_phase: failed to update phase for run %d", run_id)
+
+
+def _execute_pipeline(  # noqa: C901, PLR0912, PLR0915
+    run_id: int,
+    db_factory: Callable[[], Session],
+    staging_dir: Path,
+) -> None:
+    """Full reconciliation pipeline for run_id — runs inside a ThreadPool thread.
+
+    Creates its own DB session from ``db_factory`` to be independent of the
+    request lifecycle (ADR-002).  Phase transitions are persisted directly so
+    that the polling endpoint reflects progress in real time (plan 3.4).
+
+    Stages (plan 3.4):
+      Validando → Deduplicando → Cruzando → Persistiendo → Listo
+    """
+    db = db_factory()
+    try:
+        _update_phase(db, run_id, "Validando")
+
+        files = db.query(SourceFile).filter(SourceFile.run_id == run_id).all()
+        file_by_role: dict[str, SourceFile] = {sf.role: sf for sf in files}
+
+        _update_phase(db, run_id, "Deduplicando")
+
+        run_item_data: dict[str, _RunItemAccum] = {}
+        amazon_error_rows: list[dict[str, object]] = []
+
+        for role, source_file in file_by_role.items():
+            all_mappings: dict[str, ColumnMapping] = {
+                cm.logical_field: cm
+                for cm in db.query(ColumnMapping)
+                .filter(ColumnMapping.source_file_id == source_file.id)
+                .all()
+            }
+
+            sku_mapping = all_mappings.get("sku")
+            if sku_mapping is None:
+                continue
+
+            ext = Path(source_file.original_filename).suffix.lower()
+            staging_path = staging_dir / f"{source_file.id}{ext}"
+            if not staging_path.exists():
+                continue
+
+            df = _load_dataframe(source_file, staging_path)
+            if sku_mapping.source_column_index >= len(df.columns):
+                continue
+
+            sku_col = str(df.columns[sku_mapping.source_column_index])
+
+            if role == "occ_top":
+                dedup_result = deduplicate_occ(df, sku_col)
+                stock_mapping = all_mappings.get("stock")
+                stock_col_name = (
+                    str(df.columns[stock_mapping.source_column_index])
+                    if stock_mapping and stock_mapping.source_column_index < len(df.columns)
+                    else None
+                )
+                _persist_findings(db, source_file.id, dedup_result.findings)
+                for _, row in dedup_result.dataframe.iterrows():
+                    raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
+                    norm = normalise_sku(raw_str)
+                    if not norm.is_valid or norm.value is None:
+                        continue
+                    sku_n = norm.value
+                    occ_stock: int | None = None
+                    if stock_col_name and stock_col_name in row.index:
+                        occ_stock = _safe_int(row[stock_col_name])
+                    accum = run_item_data.setdefault(
+                        sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
+                    )
+                    accum.in_occ = True
+                    if occ_stock is not None:
+                        accum.occ_stock = occ_stock
+                    if not accum.sku_raw:
+                        accum.sku_raw = raw_str
+
+            elif role == "wm_feed":
+                stock_mapping = all_mappings.get("stock")
+                stock_col_name = (
+                    str(df.columns[stock_mapping.source_column_index])
+                    if stock_mapping and stock_mapping.source_column_index < len(df.columns)
+                    else None
+                )
+                dedup_result = deduplicate_feed(df, sku_col, stock_col_name)
+                _persist_findings(db, source_file.id, dedup_result.findings)
+                for _, row in dedup_result.dataframe.iterrows():
+                    raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
+                    norm = normalise_sku(raw_str)
+                    if not norm.is_valid or norm.value is None:
+                        continue
+                    sku_n = norm.value
+                    feed_stock: int | None = None
+                    if stock_col_name and stock_col_name in row.index:
+                        feed_stock = _safe_int(row[stock_col_name])
+                    accum = run_item_data.setdefault(
+                        sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
+                    )
+                    accum.in_feed = True
+                    if feed_stock is not None:
+                        accum.feed_stock = feed_stock
+                    if sku_n in dedup_result.stock_conflicts:
+                        accum.stock_conflict = True
+                    if not accum.sku_raw:
+                        accum.sku_raw = raw_str
+
+            elif role == "amazon_report":
+                error_col_names = _resolve_amazon_error_cols(df, all_mappings)
+                dedup_result = deduplicate_amazon_errors(
+                    df, sku_col, error_col_names.error_key_cols,
+                )
+                _persist_findings(db, source_file.id, dedup_result.findings)
+                for _, row in dedup_result.dataframe.iterrows():
+                    raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
+                    norm = normalise_sku(raw_str)
+                    if not norm.is_valid or norm.value is None:
+                        continue
+                    sku_n = norm.value
+                    accum = run_item_data.setdefault(
+                        sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
+                    )
+                    accum.in_amazon = True
+                    if not accum.sku_raw:
+                        accum.sku_raw = raw_str
+                    raw_error_code = str(
+                        row.get(error_col_names.error_code_col, "") or "",
+                    ).strip()
+                    if not raw_error_code:
+                        continue
+                    amazon_error_rows.append({
+                        "sku_norm": sku_n,
+                        "error_code": raw_error_code,
+                        "error_category": str(
+                            row.get(error_col_names.error_category_col, "ERROR") or "ERROR",
+                        ),
+                        "error_message": str(
+                            row.get(error_col_names.error_message_col, "") or "",
+                        ),
+                        "affected_field": str(
+                            row.get(error_col_names.affected_field_col, "") or "",
+                        ) or None,
+                    })
+
+        db.flush()
+
+        _update_phase(db, run_id, "Cruzando")
+
+        skus_with_errors: set[str] = {str(row["sku_norm"]) for row in amazon_error_rows}
+
+        errors_by_sku: dict[str, list[ErrorRow]] = {}
+        for err_dict in amazon_error_rows:
+            sku_n = str(err_dict["sku_norm"])
+            errors_by_sku.setdefault(sku_n, []).append(
+                ErrorRow(
+                    sku_norm=sku_n,
+                    error_code=str(err_dict["error_code"] or "UNKNOWN"),
+                    error_category=str(err_dict["error_category"] or "ERROR"),
+                    error_message=str(err_dict["error_message"] or ""),
+                    affected_field=(
+                        str(err_dict["affected_field"])
+                        if err_dict.get("affected_field")
+                        else None
+                    ),
+                ),
+            )
+
+        run_items_data: list[RunItemData] = []
+        for sku_n, accum in run_item_data.items():
+            sync_status = _compute_sync_status(
+                _in_occ=accum.in_occ,
+                in_feed=accum.in_feed,
+                in_amazon=accum.in_amazon,
+                has_errors=sku_n in skus_with_errors,
+            )
+            run_items_data.append(
+                RunItemData(
+                    sku_norm=sku_n,
+                    sku_raw=accum.sku_raw,
+                    in_occ=accum.in_occ,
+                    in_feed=accum.in_feed,
+                    in_amazon_report=accum.in_amazon,
+                    sync_status=sync_status,
+                    feed_stock=accum.feed_stock,
+                    occ_stock=accum.occ_stock,
+                    stock_conflict=accum.stock_conflict,
+                    error_rows=errors_by_sku.get(sku_n, []),
+                ),
+            )
+
+        _update_phase(db, run_id, "Persistiendo")
+        persist_run_results(db, run_id, run_items_data)
+
+    except Exception:
+        logger.exception("Pipeline failed for run %d", run_id)
+        raise
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,10 @@
 /**
- * ConciliacionPage — orchestrates the 4-step mapping wizard (T-3.9).
+ * ConciliacionPage — orchestrates the 5-step mapping + processing wizard (T-4.6).
  *
  * Owns:
  *   - All wizard state via useWizardState()
- *   - API side-effects (createRun, uploadFile, getPreview, confirmMapping)
+ *   - API side-effects (createRun, uploadFile, getPreview, confirmMapping,
+ *                       triggerProcess, getRunStatus)
  *   - Step navigation
  *
  * Children (step components) receive state slices and callbacks; they never
@@ -16,6 +17,7 @@ import { Step1Upload } from "../components/wizard/steps/Step1Upload";
 import { Step2SheetPicker } from "../components/wizard/steps/Step2SheetPicker";
 import { Step3Mapping } from "../components/wizard/steps/Step3Mapping";
 import { Step4Summary } from "../components/wizard/steps/Step4Summary";
+import { Step5Progress } from "../components/wizard/steps/Step5Progress";
 import { useWizardState } from "../hooks/useWizardState";
 import * as api from "../api/ingestion";
 import type { FileRole } from "../types/ingestion";
@@ -119,21 +121,34 @@ export function ConciliacionPage(): JSX.Element {
   };
 
   // ---------------------------------------------------------------------------
-  // Step 4 — process (placeholder: T-4.6 will implement the actual endpoint)
+  // Step 4 → Step 5: trigger process and advance wizard
   // ---------------------------------------------------------------------------
 
   const handleProcess = (): void => {
-    // RNF-08 double-check: should never be called when not confirmed
-    if (!allMappingsConfirmed) return;
-    // TODO T-4.6: POST /runs/{id}/process
-    alert(`Run #${state.runId ?? "?"} listo para procesar. (T-4.6 pendiente)`);
+    if (!allMappingsConfirmed || state.runId === null) return;
+    dispatch({ type: "SET_STEP", step: 5 });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Step 5 — process API callbacks (passed as props to keep Step5 side-effect-free)
+  // ---------------------------------------------------------------------------
+
+  const handleTriggerProcess = async (): Promise<string> => {
+    if (state.runId === null) throw new Error("No hay un run activo");
+    const res = await api.triggerProcess(state.runId);
+    return res.status_url;
+  };
+
+  const handlePollStatus = async () => {
+    if (state.runId === null) throw new Error("No hay un run activo");
+    return api.getRunStatus(state.runId);
   };
 
   // ---------------------------------------------------------------------------
   // Navigation helpers
   // ---------------------------------------------------------------------------
 
-  const goTo = (step: 1 | 2 | 3 | 4) => () =>
+  const goTo = (step: 1 | 2 | 3 | 4 | 5) => () =>
     dispatch({ type: "SET_STEP", step });
 
   const advanceToStep2 = () => {
@@ -193,6 +208,14 @@ export function ConciliacionPage(): JSX.Element {
             allConfirmed={allMappingsConfirmed}
             onProcess={handleProcess}
             onBack={goTo(3)}
+          />
+        )}
+
+        {state.step === 5 && state.runId !== null && (
+          <Step5Progress
+            runId={state.runId}
+            onProcess={handleTriggerProcess}
+            onPollStatus={handlePollStatus}
           />
         )}
       </div>

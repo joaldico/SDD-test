@@ -10,7 +10,9 @@ import type {
   MappingItem,
   MappingResponse,
   PreviewResponse,
+  ProcessResponse,
   RunResponse,
+  RunStatusResponse,
   SourceFileResponse,
 } from "../types/ingestion";
 
@@ -95,4 +97,25 @@ export async function confirmMapping(
   );
   if (!res.ok) await parseError(res, `confirmMapping failed: ${res.status}`);
   return res.json() as Promise<MappingResponse>;
+}
+
+/**
+ * POST /runs/{runId}/process — trigger async reconciliation (T-4.6, ADR-002).
+ *
+ * Returns 202 Accepted with a status_url to poll.
+ * Throws if the mapping gate is not satisfied (409 Conflict).
+ */
+export async function triggerProcess(runId: number): Promise<ProcessResponse> {
+  const res = await fetch(`${BASE}/runs/${runId}/process`, {
+    method: "POST",
+  });
+  if (!res.ok) await parseError(res, `triggerProcess failed: ${res.status}`);
+  return res.json() as Promise<ProcessResponse>;
+}
+
+/** GET /runs/{runId}/status — poll pipeline phase and summary metrics. */
+export async function getRunStatus(runId: number): Promise<RunStatusResponse> {
+  const res = await fetch(`${BASE}/runs/${runId}/status`);
+  if (!res.ok) await parseError(res, `getRunStatus failed: ${res.status}`);
+  return res.json() as Promise<RunStatusResponse>;
 }

@@ -10,17 +10,18 @@ const STEPS: Step[] = [
   { label: "2", description: "Selección de hoja" },
   { label: "3", description: "Mapeo de columnas" },
   { label: "4", description: "Resumen" },
+  { label: "5", description: "Procesando" },
 ];
 
 interface Props {
-  currentStep: 1 | 2 | 3 | 4;
+  currentStep: 1 | 2 | 3 | 4 | 5;
 }
 
 export function StepIndicator({ currentStep }: Props): JSX.Element {
   return (
     <nav aria-label="Pasos del asistente" style={styles.container}>
       {STEPS.map((step, idx) => {
-        const stepNum = (idx + 1) as 1 | 2 | 3 | 4;
+        const stepNum = (idx + 1) as 1 | 2 | 3 | 4 | 5;
         const isCompleted = stepNum < currentStep;
         const isActive = stepNum === currentStep;
 

@@ -1,22 +1,32 @@
-"""Reporting API router — T-5.1 dashboard metrics + T-5.2 report views.
+"""Reporting API router — T-5.1 dashboard metrics + T-5.2 report views + T-5.3 export.
 
 Endpoints:
   GET /api/v1/runs/{run_id}/metrics          Dashboard KPIs for a completed run.
   GET /api/v1/runs/{run_id}/report/families  Vista 1 — errors grouped by family.
+  GET /api/v1/runs/{run_id}/export           xlsx/csv export replicating the 3 views.
 """
 
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 — used at runtime in response mapping
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session  # noqa: TC002
 
 from marketplace_conciliator.platform.db.models.runs import ReconciliationRun
 from marketplace_conciliator.platform.db.session import get_db
+from marketplace_conciliator.reporting.export import (
+    CatalogHealthExportRow,
+    ExportPayload,
+    FamilyExportRow,
+    SkuDetailExportRow,
+    build_csv_archive,
+    build_xlsx,
+)
 from marketplace_conciliator.reporting.families import RawFamilyRow, build_families_report
 from marketplace_conciliator.reporting.metrics import (
     MetricsNotReadyError,
@@ -226,4 +236,130 @@ def get_families_report(
             )
             for f in report.families
         ],
+    )
+
+
+_SKU_DETAIL_QUERY = sa_text("""
+    SELECT
+        ri.sku_raw,
+        ri.sku_norm,
+        ie.error_code,
+        ie.error_category,
+        ie.error_message,
+        ie.affected_field
+    FROM item_errors ie
+    JOIN run_items ri ON ri.id = ie.run_item_id
+    WHERE ri.run_id = :run_id
+    ORDER BY ri.sku_norm ASC, ie.error_code ASC, ie.id ASC
+""")
+
+_CATALOG_HEALTH_EXPORT_QUERY = sa_text("""
+    SELECT
+        sku_raw,
+        sku_norm,
+        sync_status,
+        feed_stock,
+        occ_stock,
+        stock_conflict,
+        in_occ,
+        in_feed,
+        in_amazon_report
+    FROM run_items
+    WHERE run_id = :run_id
+    ORDER BY
+        CASE sync_status
+            WHEN 'SENT_WITH_ERROR'    THEN 1
+            WHEN 'DESYNC_FEED_ONLY'   THEN 2
+            WHEN 'DESYNC_AMAZON_ONLY' THEN 3
+            WHEN 'NOT_SENT'           THEN 4
+            WHEN 'SENT_OK'            THEN 5
+            ELSE 9
+        END ASC,
+        stock_conflict DESC,
+        COALESCE(feed_stock, 0) DESC,
+        sku_norm ASC
+""")
+
+
+def _build_export_payload(db: Session, run_id: int) -> ExportPayload:
+    family_rows = db.execute(_FAMILIES_QUERY, {"run_id": run_id}).fetchall()
+    families = [
+        FamilyExportRow(
+            family_code=str(row[0]),
+            family_name=str(row[1]),
+            error_code=str(row[3]),
+            message=str(row[4]),
+            error_count=int(row[5]),
+            unique_skus_in_family=int(row[6]),
+        )
+        for row in family_rows
+    ]
+
+    sku_rows = db.execute(_SKU_DETAIL_QUERY, {"run_id": run_id}).fetchall()
+    sku_details = [
+        SkuDetailExportRow(
+            sku_raw=str(row[0]),
+            sku_norm=str(row[1]),
+            error_code=str(row[2]),
+            error_category=str(row[3]),
+            error_message=str(row[4]),
+            affected_field=str(row[5]) if row[5] is not None else None,
+        )
+        for row in sku_rows
+    ]
+
+    catalog_rows = db.execute(_CATALOG_HEALTH_EXPORT_QUERY, {"run_id": run_id}).fetchall()
+    catalog_health = [
+        CatalogHealthExportRow(
+            sku_raw=str(row[0]),
+            sku_norm=str(row[1]),
+            sync_status=str(row[2]),
+            feed_stock=row[3],
+            occ_stock=row[4],
+            stock_conflict=bool(row[5]),
+            stock_disponible=(row[3] is not None and row[3] > 0),
+            in_occ=bool(row[6]),
+            in_feed=bool(row[7]),
+            in_amazon_report=bool(row[8]),
+        )
+        for row in catalog_rows
+    ]
+
+    return ExportPayload(
+        families=families,
+        sku_details=sku_details,
+        catalog_health=catalog_health,
+    )
+
+
+@router.get(
+    "/{run_id}/export",
+    summary="Export report as xlsx (3 sheets) or csv zip (T-5.3, RF-09)",
+    response_class=Response,
+)
+def export_run_report(
+    run_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    format: Annotated[  # noqa: A002
+        Literal["xlsx", "csv"],
+        Query(description="Export format: xlsx workbook or csv zip archive"),
+    ],
+) -> Response:
+    """Export the three report views as a downloadable file."""
+    _require_completed_run(db, run_id)
+    payload = _build_export_payload(db, run_id)
+
+    if format == "xlsx":
+        content = build_xlsx(payload)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"informe_run_{run_id}.xlsx"
+    else:
+        content = build_csv_archive(payload)
+        media_type = "application/zip"
+        filename = f"informe_run_{run_id}.zip"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

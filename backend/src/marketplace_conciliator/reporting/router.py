@@ -239,6 +239,118 @@ def get_families_report(
     )
 
 
+class SkuDetailItemResponse(BaseModel):
+    """One SKU error row for Vista 2 drill-down."""
+
+    sku_raw: str
+    sku_norm: str
+    error_code: str
+    error_category: str
+    error_message: str
+    affected_field: str | None
+
+
+class SkuDetailReportResponse(BaseModel):
+    """Response body for GET /runs/{run_id}/report/sku-detail (Vista 2, plan 3.7)."""
+
+    run_id: int
+    family_code: str | None
+    error_code: str | None
+    items: list[SkuDetailItemResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+_SKU_DETAIL_LIST_QUERY = sa_text("""
+    SELECT
+        ri.sku_raw,
+        ri.sku_norm,
+        ie.error_code,
+        ie.error_category,
+        ie.error_message,
+        ie.affected_field
+    FROM item_errors ie
+    JOIN run_items ri ON ri.id = ie.run_item_id
+    JOIN error_codes ec ON ec.code = ie.error_code
+    WHERE ri.run_id = :run_id
+      AND (:family_code IS NULL OR ec.family_code = :family_code)
+      AND (:error_code IS NULL OR ie.error_code = :error_code)
+    ORDER BY ri.sku_norm ASC, ie.error_code ASC, ie.id ASC
+    LIMIT :limit OFFSET :offset
+""")
+
+
+_SKU_DETAIL_COUNT_QUERY = sa_text("""
+    SELECT COUNT(*)
+    FROM item_errors ie
+    JOIN run_items ri ON ri.id = ie.run_item_id
+    JOIN error_codes ec ON ec.code = ie.error_code
+    WHERE ri.run_id = :run_id
+      AND (:family_code IS NULL OR ec.family_code = :family_code)
+      AND (:error_code IS NULL OR ie.error_code = :error_code)
+""")
+
+
+@router.get(
+    "/{run_id}/report/sku-detail",
+    response_model=SkuDetailReportResponse,
+    summary="Vista 2 — Detalle SKU por familia/código (plan 3.7)",
+)
+def get_sku_detail_report(
+    run_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    family: Annotated[
+        str | None,
+        Query(description="Filter by error family code"),
+    ] = None,
+    code: Annotated[
+        str | None,
+        Query(description="Filter by Amazon error code"),
+    ] = None,
+    page: Annotated[int, Query(ge=1, description="Page number (1-based)")] = 1,
+    page_size: Annotated[
+        int,
+        Query(ge=1, le=500, description="Rows per page"),
+    ] = 50,
+) -> SkuDetailReportResponse:
+    """Return SKU-level error rows for drill-down from Vista 1."""
+    _require_completed_run(db, run_id)
+
+    params = {
+        "run_id": run_id,
+        "family_code": family,
+        "error_code": code,
+    }
+    total = int(db.execute(_SKU_DETAIL_COUNT_QUERY, params).scalar_one())
+    offset = (page - 1) * page_size
+
+    rows = db.execute(
+        _SKU_DETAIL_LIST_QUERY,
+        {**params, "limit": page_size, "offset": offset},
+    ).fetchall()
+
+    return SkuDetailReportResponse(
+        run_id=run_id,
+        family_code=family,
+        error_code=code,
+        items=[
+            SkuDetailItemResponse(
+                sku_raw=str(row[0]),
+                sku_norm=str(row[1]),
+                error_code=str(row[2]),
+                error_category=str(row[3]),
+                error_message=str(row[4]),
+                affected_field=str(row[5]) if row[5] is not None else None,
+            )
+            for row in rows
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 _SKU_DETAIL_QUERY = sa_text("""
     SELECT
         ri.sku_raw,

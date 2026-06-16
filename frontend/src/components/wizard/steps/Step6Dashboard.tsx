@@ -1,5 +1,5 @@
 /**
- * Step6Dashboard — T-5.1 / T-5.2 report shell (wizard step 6).
+ * Step6Dashboard — T-5.1 / T-5.4 report dashboard (wizard step 6).
  *
  * Fetches metrics, families report and catalog health for the completed run.
  */
@@ -8,8 +8,10 @@ import { useEffect, useState, type JSX } from "react";
 import { RunDashboardLayout } from "../../dashboard/RunDashboardLayout";
 import type {
   CatalogHealthResponse,
+  ExportFormat,
   FamiliesReportResponse,
   RunMetricsResponse,
+  SkuDetailItem,
 } from "../../../types/reporting";
 
 interface Props {
@@ -17,6 +19,11 @@ interface Props {
   onFetchMetrics: () => Promise<RunMetricsResponse>;
   onFetchFamilies: () => Promise<FamiliesReportResponse>;
   onFetchCatalog: () => Promise<CatalogHealthResponse>;
+  onFetchSkusForCode: (
+    familyCode: string,
+    errorCode: string,
+  ) => Promise<SkuDetailItem[]>;
+  onExport: (format: ExportFormat) => Promise<void>;
   onBack?: () => void;
 }
 
@@ -35,6 +42,8 @@ export function Step6Dashboard({
   onFetchMetrics,
   onFetchFamilies,
   onFetchCatalog,
+  onFetchSkusForCode,
+  onExport,
   onBack,
 }: Props): JSX.Element {
   const [screen, setScreen] = useState<ScreenState>({ kind: "loading" });
@@ -97,6 +106,8 @@ export function Step6Dashboard({
         metrics={screen.metrics}
         families={screen.families}
         catalog={screen.catalog}
+        onFetchSkusForCode={onFetchSkusForCode}
+        onExport={onExport}
       />
       {onBack ? (
         <div style={styles.footer}>

@@ -1,15 +1,16 @@
 /**
- * RunDashboardLayout — render tests (T-5.1 / T-5.2).
+ * RunDashboardLayout — render tests (T-5.1 / T-5.4).
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { RunDashboardLayout } from "../../components/dashboard/RunDashboardLayout";
 import type {
   CatalogHealthResponse,
   FamiliesReportResponse,
   RunMetricsResponse,
+  SkuDetailItem,
 } from "../../types/reporting";
 
 const sampleMetrics: RunMetricsResponse = {
@@ -80,9 +81,22 @@ const sampleCatalog: CatalogHealthResponse = {
   ],
 };
 
+const sampleSkus: SkuDetailItem[] = [
+  {
+    sku_raw: "TWA85XL",
+    sku_norm: "TWA85XL",
+    error_code: "18299",
+    error_category: "ERROR",
+    error_message: "Marca no autorizada",
+    affected_field: "brand",
+  },
+];
+
 describe("RunDashboardLayout", () => {
-  it("renders summary cards and detail tables", async () => {
+  it("renders KPI cards, export buttons and tabbed report views", async () => {
     const user = userEvent.setup();
+    const onFetchSkusForCode = vi.fn().mockResolvedValue(sampleSkus);
+    const onExport = vi.fn().mockResolvedValue(undefined);
 
     render(
       <RunDashboardLayout
@@ -90,24 +104,45 @@ describe("RunDashboardLayout", () => {
         metrics={sampleMetrics}
         families={sampleFamilies}
         catalog={sampleCatalog}
+        onFetchSkusForCode={onFetchSkusForCode}
+        onExport={onExport}
       />,
     );
 
     expect(screen.getByTestId("run-dashboard")).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-total-skus")).toHaveTextContent("4,094");
-    expect(screen.getByTestId("dashboard-total-errors")).toHaveTextContent("845");
-    expect(screen.getByTestId("dashboard-desynchronized")).toHaveTextContent("66");
+    expect(screen.getByTestId("export-xlsx-button")).toBeInTheDocument();
+    expect(screen.getByTestId("export-csv-button")).toBeInTheDocument();
 
-    expect(screen.getByText("Top de Errores por Familia")).toBeInTheDocument();
-    expect(screen.getByTestId("families-table")).toBeInTheDocument();
-    expect(screen.getByTestId("family-row-AUTORIZACION_MARCA")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-tab-catalog")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-tab-families")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-tab-metrics")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Autorización de marca" }));
-    expect(screen.getByTestId("family-codes-AUTORIZACION_MARCA")).toHaveTextContent("18299");
-
-    expect(screen.getByText("Detalle del Catálogo")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-panel-catalog")).toBeVisible();
     expect(screen.getByTestId("catalog-table")).toBeInTheDocument();
-    expect(screen.getByTestId("catalog-row-SKU-A")).toBeInTheDocument();
-    expect(screen.getByTestId("stock-conflict-badge")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("dashboard-tab-families"));
+    expect(screen.getByTestId("dashboard-panel-families")).toBeVisible();
+    expect(screen.getByTestId("families-table")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /Autorización de marca/ }),
+    );
+    expect(screen.getByTestId("family-codes-AUTORIZACION_MARCA")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /18299/ }));
+    await waitFor(() => {
+      expect(onFetchSkusForCode).toHaveBeenCalledWith("AUTORIZACION_MARCA", "18299");
+    });
+    expect(screen.getByTestId("sku-list-AUTORIZACION_MARCA-18299")).toHaveTextContent(
+      "TWA85XL",
+    );
+
+    await user.click(screen.getByTestId("dashboard-tab-metrics"));
+    expect(screen.getByTestId("dashboard-panel-metrics")).toBeVisible();
+    expect(screen.getByTestId("metrics-breakdown-table")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("export-xlsx-button"));
+    expect(onExport).toHaveBeenCalledWith("xlsx");
   });
 });

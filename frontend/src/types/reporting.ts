@@ -72,3 +72,33 @@ export interface CatalogHealthQuery {
   page?: number;
   page_size?: number;
 }
+
+/** Types for GET /runs/{id}/report/sku-detail — Vista 2 drill-down (plan 3.7) */
+
+export interface SkuDetailItem {
+  sku_raw: string;
+  sku_norm: string;
+  error_code: string;
+  error_category: string;
+  error_message: string;
+  affected_field: string | null;
+}
+
+export interface SkuDetailResponse {
+  run_id: number;
+  family_code: string | null;
+  error_code: string | null;
+  items: SkuDetailItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface SkuDetailQuery {
+  family?: string;
+  code?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export type ExportFormat = "xlsx" | "csv";

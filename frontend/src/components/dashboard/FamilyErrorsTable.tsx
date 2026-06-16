@@ -1,22 +1,82 @@
 /**
- * FamilyErrorsTable — Top de Errores por Familia (T-5.2 Vista 1).
+ * FamilyErrorsTable — Errores por Familia with familia→código→SKU drill-down (T-5.2 / T-5.4).
  */
 
-import { useState, type JSX } from "react";
-import type { FamiliesReportResponse } from "../../types/reporting";
+import { Fragment, useState, type JSX } from "react";
+import type {
+  FamiliesReportResponse,
+  SkuDetailItem,
+} from "../../types/reporting";
 
 interface Props {
   report: FamiliesReportResponse;
+  onFetchSkusForCode: (
+    familyCode: string,
+    errorCode: string,
+  ) => Promise<SkuDetailItem[]>;
 }
 
 const numberFmt = new Intl.NumberFormat("es-ES");
 
-export function FamilyErrorsTable({ report }: Props): JSX.Element {
-  const [expanded, setExpanded] = useState<string | null>(null);
+export function FamilyErrorsTable({
+  report,
+  onFetchSkusForCode,
+}: Props): JSX.Element {
+  const [expandedFamily, setExpandedFamily] = useState<string | null>(null);
+  const [expandedCode, setExpandedCode] = useState<string | null>(null);
+  const [skuCache, setSkuCache] = useState<Record<string, SkuDetailItem[]>>({});
+  const [loadingCode, setLoadingCode] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const cacheKey = (familyCode: string, errorCode: string): string =>
+    `${familyCode}:${errorCode}`;
+
+  const handleFamilyToggle = (familyCode: string): void => {
+    if (expandedFamily === familyCode) {
+      setExpandedFamily(null);
+      setExpandedCode(null);
+      return;
+    }
+    setExpandedFamily(familyCode);
+    setExpandedCode(null);
+    setLoadError(null);
+  };
+
+  const handleCodeToggle = async (
+    familyCode: string,
+    errorCode: string,
+  ): Promise<void> => {
+    const key = cacheKey(familyCode, errorCode);
+    if (expandedCode === key) {
+      setExpandedCode(null);
+      return;
+    }
+
+    setExpandedCode(key);
+    setLoadError(null);
+
+    if (skuCache[key]) return;
+
+    setLoadingCode(key);
+    try {
+      const items = await onFetchSkusForCode(familyCode, errorCode);
+      setSkuCache((prev) => ({ ...prev, [key]: items }));
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "No se pudieron cargar los SKUs";
+      setLoadError(message);
+    } finally {
+      setLoadingCode(null);
+    }
+  };
 
   return (
-    <section aria-label="Top de Errores por Familia" style={styles.section}>
-      <h3 style={styles.heading}>Top de Errores por Familia</h3>
+    <section aria-label="Errores por Familia" style={styles.section}>
+      <h3 style={styles.heading}>Errores por Familia</h3>
+      <p style={styles.hint}>
+        Despliega una familia para ver sus códigos y selecciona un código para
+        listar los SKUs afectados.
+      </p>
 
       {report.sin_clasificar_warning ? (
         <p style={styles.warning} data-testid="sin-clasificar-warning" role="alert">
@@ -31,65 +91,163 @@ export function FamilyErrorsTable({ report }: Props): JSX.Element {
         </p>
       ) : (
         <div style={styles.tableWrap}>
-        <table style={styles.table} data-testid="families-table">
-          <thead>
-            <tr>
-              <th style={styles.th}>Familia</th>
-              <th style={styles.thRight}>SKUs únicos</th>
-              <th style={styles.thRight}>Errores</th>
-              <th style={styles.th}>Códigos</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.families.map((family) => {
-              const isOpen = expanded === family.code;
-              return (
-                <tr key={family.code} data-testid={`family-row-${family.code}`}>
-                  <td style={styles.td}>
-                    <button
-                      type="button"
-                      style={styles.familyButton}
-                      aria-expanded={isOpen}
-                      onClick={() =>
-                        setExpanded(isOpen ? null : family.code)
-                      }
-                    >
-                      {family.display_name}
-                    </button>
-                  </td>
-                  <td style={styles.tdRight}>
-                    {numberFmt.format(family.unique_skus)}
-                  </td>
-                  <td style={styles.tdRight}>
-                    {numberFmt.format(family.total_errors)}
-                  </td>
-                  <td style={styles.td}>
-                    {isOpen ? (
-                      <ul style={styles.codeList} data-testid={`family-codes-${family.code}`}>
-                        {family.codes.map((code) => (
-                          <li key={code.code}>
-                            <strong>{code.code}</strong>
-                            {" · "}
-                            {numberFmt.format(code.count)} — {code.message}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <span style={styles.codeSummary}>
-                        {family.codes
-                          .slice(0, 2)
-                          .map((c) => c.code)
-                          .join(", ")}
-                        {family.codes.length > 2 ? "…" : ""}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+          <table style={styles.table} data-testid="families-table">
+            <thead>
+              <tr>
+                <th style={styles.th}>Familia</th>
+                <th style={styles.thRight}>SKUs únicos</th>
+                <th style={styles.thRight}>Errores</th>
+                <th style={styles.th}>Códigos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.families.map((family) => {
+                const isFamilyOpen = expandedFamily === family.code;
+                return (
+                  <Fragment key={family.code}>
+                    <tr data-testid={`family-row-${family.code}`}>
+                      <td style={styles.td}>
+                        <button
+                          type="button"
+                          style={styles.familyButton}
+                          aria-expanded={isFamilyOpen}
+                          onClick={() => handleFamilyToggle(family.code)}
+                        >
+                          {isFamilyOpen ? "▾" : "▸"} {family.display_name}
+                        </button>
+                      </td>
+                      <td style={styles.tdRight}>
+                        {numberFmt.format(family.unique_skus)}
+                      </td>
+                      <td style={styles.tdRight}>
+                        {numberFmt.format(family.total_errors)}
+                      </td>
+                      <td style={styles.td}>
+                        <span style={styles.codeSummary}>
+                          {family.codes.length}{" "}
+                          {family.codes.length === 1 ? "código" : "códigos"}
+                        </span>
+                      </td>
+                    </tr>
+
+                    {isFamilyOpen ? (
+                      <tr>
+                        <td colSpan={4} style={styles.detailCell}>
+                          <div
+                            style={styles.codePanel}
+                            data-testid={`family-codes-${family.code}`}
+                          >
+                            <table style={styles.innerTable}>
+                              <thead>
+                                <tr>
+                                  <th style={styles.innerTh}>Código</th>
+                                  <th style={styles.innerTh}>Mensaje</th>
+                                  <th style={styles.innerThRight}>Errores</th>
+                                  <th style={styles.innerTh}>SKUs</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {family.codes.map((codeRow) => {
+                                  const key = cacheKey(family.code, codeRow.code);
+                                  const isCodeOpen = expandedCode === key;
+                                  const skus = skuCache[key] ?? [];
+                                  const isLoading = loadingCode === key;
+
+                                  return (
+                                    <Fragment key={codeRow.code}>
+                                      <tr
+                                        data-testid={`code-row-${family.code}-${codeRow.code}`}
+                                      >
+                                        <td style={styles.innerTd}>
+                                          <button
+                                            type="button"
+                                            style={styles.codeButton}
+                                            aria-expanded={isCodeOpen}
+                                            onClick={() =>
+                                              void handleCodeToggle(
+                                                family.code,
+                                                codeRow.code,
+                                              )
+                                            }
+                                          >
+                                            {isCodeOpen ? "▾" : "▸"}{" "}
+                                            <strong>{codeRow.code}</strong>
+                                          </button>
+                                        </td>
+                                        <td style={styles.innerTd}>{codeRow.message}</td>
+                                        <td style={styles.innerTdRight}>
+                                          {numberFmt.format(codeRow.count)}
+                                        </td>
+                                        <td style={styles.innerTd}>
+                                          {isLoading ? (
+                                            <span style={styles.muted}>Cargando…</span>
+                                          ) : isCodeOpen ? (
+                                            <span style={styles.muted}>
+                                              {skus.length} SKU
+                                              {skus.length === 1 ? "" : "s"}
+                                            </span>
+                                          ) : (
+                                            <span style={styles.muted}>Ver SKUs</span>
+                                          )}
+                                        </td>
+                                      </tr>
+
+                                      {isCodeOpen ? (
+                                        <tr>
+                                          <td colSpan={4} style={styles.skuCell}>
+                                            {loadError && expandedCode === key ? (
+                                              <p style={styles.errorText}>{loadError}</p>
+                                            ) : isLoading ? (
+                                              <p
+                                                style={styles.muted}
+                                                data-testid={`sku-loading-${family.code}-${codeRow.code}`}
+                                              >
+                                                Cargando SKUs afectados…
+                                              </p>
+                                            ) : skus.length === 0 ? (
+                                              <p
+                                                style={styles.muted}
+                                                data-testid={`sku-empty-${family.code}-${codeRow.code}`}
+                                              >
+                                                No hay SKUs para este código.
+                                              </p>
+                                            ) : (
+                                              <ul
+                                                style={styles.skuList}
+                                                data-testid={`sku-list-${family.code}-${codeRow.code}`}
+                                              >
+                                                {skus.map((sku) => (
+                                                  <li
+                                                    key={`${sku.sku_norm}-${sku.error_code}`}
+                                                    data-testid={`sku-item-${sku.sku_norm}`}
+                                                  >
+                                                    <span style={styles.skuCode}>
+                                                      {sku.sku_raw}
+                                                    </span>
+                                                    {" — "}
+                                                    {sku.error_message}
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      ) : null}
+                                    </Fragment>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
@@ -106,6 +264,11 @@ const styles = {
     fontWeight: 600,
     margin: 0,
     color: "var(--color-text)",
+  },
+  hint: {
+    margin: 0,
+    fontSize: "13px",
+    color: "var(--color-text-muted)",
   },
   warning: {
     margin: 0,
@@ -156,6 +319,49 @@ const styles = {
     textAlign: "right" as const,
     verticalAlign: "top" as const,
   },
+  detailCell: {
+    padding: 0,
+    backgroundColor: "#f8fafc",
+    borderBottom: "1px solid var(--color-border)",
+  },
+  codePanel: {
+    padding: "12px 16px",
+  },
+  innerTable: {
+    width: "100%",
+    borderCollapse: "collapse" as const,
+    fontSize: "12px",
+  },
+  innerTh: {
+    textAlign: "left" as const,
+    padding: "8px 10px",
+    borderBottom: "1px solid var(--color-border)",
+    fontWeight: 600,
+    color: "var(--color-text-muted)",
+  },
+  innerThRight: {
+    textAlign: "right" as const,
+    padding: "8px 10px",
+    borderBottom: "1px solid var(--color-border)",
+    fontWeight: 600,
+    color: "var(--color-text-muted)",
+  },
+  innerTd: {
+    padding: "8px 10px",
+    borderBottom: "1px solid var(--color-border)",
+    verticalAlign: "top" as const,
+  },
+  innerTdRight: {
+    padding: "8px 10px",
+    borderBottom: "1px solid var(--color-border)",
+    textAlign: "right" as const,
+    verticalAlign: "top" as const,
+  },
+  skuCell: {
+    padding: "8px 10px 12px 28px",
+    backgroundColor: "#fff",
+    borderBottom: "1px solid var(--color-border)",
+  },
   familyButton: {
     background: "none",
     border: "none",
@@ -164,16 +370,39 @@ const styles = {
     color: "var(--color-primary)",
     cursor: "pointer",
     textAlign: "left" as const,
-    textDecoration: "underline",
+    fontWeight: 600,
   },
-  codeList: {
+  codeButton: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    font: "inherit",
+    color: "var(--color-text)",
+    cursor: "pointer",
+    textAlign: "left" as const,
+  },
+  codeSummary: {
+    color: "var(--color-text-muted)",
+  },
+  skuList: {
     margin: 0,
     paddingLeft: "18px",
     display: "flex",
     flexDirection: "column" as const,
-    gap: "4px",
+    gap: "6px",
   },
-  codeSummary: {
+  skuCode: {
+    fontFamily: "monospace",
+    fontSize: "12px",
+    fontWeight: 600,
+  },
+  muted: {
     color: "var(--color-text-muted)",
+    margin: 0,
+  },
+  errorText: {
+    margin: 0,
+    fontSize: "12px",
+    color: "#dc2626",
   },
 } as const;

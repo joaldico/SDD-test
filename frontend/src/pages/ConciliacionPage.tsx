@@ -161,6 +161,22 @@ export function ConciliacionPage(): JSX.Element {
     return reportingApi.getCatalogHealth(state.runId, { page: 1, page_size: 50 });
   };
 
+  const handleFetchSkusForCode = async (familyCode: string, errorCode: string) => {
+    if (state.runId === null) throw new Error("No hay un run activo");
+    const response = await reportingApi.getSkuDetail(state.runId, {
+      family: familyCode,
+      code: errorCode,
+      page: 1,
+      page_size: 100,
+    });
+    return response.items;
+  };
+
+  const handleExportReport = async (format: "xlsx" | "csv") => {
+    if (state.runId === null) throw new Error("No hay un run activo");
+    await reportingApi.exportRunReport(state.runId, format);
+  };
+
   const handleViewDashboard = (): void => {
     dispatch({ type: "SET_STEP", step: 6 });
   };
@@ -247,6 +263,8 @@ export function ConciliacionPage(): JSX.Element {
             onFetchMetrics={handleFetchMetrics}
             onFetchFamilies={handleFetchFamilies}
             onFetchCatalog={handleFetchCatalog}
+            onFetchSkusForCode={handleFetchSkusForCode}
+            onExport={handleExportReport}
             onBack={goTo(5)}
           />
         )}

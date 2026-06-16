@@ -1,5 +1,5 @@
 /**
- * Step6Dashboard — integration render tests (T-5.1 / T-5.2).
+ * Step6Dashboard — integration render tests (T-5.1 / T-5.4).
  */
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -43,6 +43,9 @@ const sampleCatalog: CatalogHealthResponse = {
   items: [],
 };
 
+const noopSkus = vi.fn().mockResolvedValue([]);
+const noopExport = vi.fn().mockResolvedValue(undefined);
+
 describe("Step6Dashboard", () => {
   it("shows loading state while report data is fetched", () => {
     const pending = () => new Promise<never>(() => {
@@ -55,13 +58,15 @@ describe("Step6Dashboard", () => {
         onFetchMetrics={vi.fn(pending)}
         onFetchFamilies={vi.fn(pending)}
         onFetchCatalog={vi.fn(pending)}
+        onFetchSkusForCode={noopSkus}
+        onExport={noopExport}
       />,
     );
 
     expect(screen.getByTestId("dashboard-loading")).toBeInTheDocument();
   });
 
-  it("renders dashboard summary cards and tables when data loads", async () => {
+  it("renders dashboard summary cards and tabbed views when data loads", async () => {
     const onFetchMetrics = vi.fn().mockResolvedValue(sampleMetrics);
     const onFetchFamilies = vi.fn().mockResolvedValue(sampleFamilies);
     const onFetchCatalog = vi.fn().mockResolvedValue(sampleCatalog);
@@ -72,6 +77,8 @@ describe("Step6Dashboard", () => {
         onFetchMetrics={onFetchMetrics}
         onFetchFamilies={onFetchFamilies}
         onFetchCatalog={onFetchCatalog}
+        onFetchSkusForCode={noopSkus}
+        onExport={noopExport}
       />,
     );
 
@@ -83,8 +90,11 @@ describe("Step6Dashboard", () => {
     expect(onFetchFamilies).toHaveBeenCalledOnce();
     expect(onFetchCatalog).toHaveBeenCalledOnce();
     expect(screen.getByTestId("dashboard-total-skus")).toHaveTextContent("120");
-    expect(screen.getByText("Top de Errores por Familia")).toBeInTheDocument();
-    expect(screen.getByText("Detalle del Catálogo")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-tab-catalog")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-tab-families")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-tab-metrics")).toBeInTheDocument();
+    expect(screen.getByTestId("export-xlsx-button")).toBeInTheDocument();
+    expect(screen.getByTestId("export-csv-button")).toBeInTheDocument();
   });
 
   it("shows error state when any fetch fails", async () => {
@@ -96,6 +106,8 @@ describe("Step6Dashboard", () => {
         onFetchMetrics={onFetchMetrics}
         onFetchFamilies={vi.fn().mockResolvedValue(sampleFamilies)}
         onFetchCatalog={vi.fn().mockResolvedValue(sampleCatalog)}
+        onFetchSkusForCode={noopSkus}
+        onExport={noopExport}
       />,
     );
 

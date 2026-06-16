@@ -5,8 +5,11 @@
 import type {
   CatalogHealthQuery,
   CatalogHealthResponse,
+  ExportFormat,
   FamiliesReportResponse,
   RunMetricsResponse,
+  SkuDetailQuery,
+  SkuDetailResponse,
 } from "../types/reporting";
 
 const BASE = "/api/v1";
@@ -53,4 +56,54 @@ export async function getCatalogHealth(
   const res = await fetch(url);
   if (!res.ok) await parseError(res, `getCatalogHealth failed: ${res.status}`);
   return res.json() as Promise<CatalogHealthResponse>;
+}
+
+/** GET /runs/{runId}/report/sku-detail — Vista 2 SKU rows for family/code drill-down. */
+export async function getSkuDetail(
+  runId: number,
+  query: SkuDetailQuery = {},
+): Promise<SkuDetailResponse> {
+  const params = new URLSearchParams();
+  if (query.family) params.set("family", query.family);
+  if (query.code) params.set("code", query.code);
+  if (query.page !== undefined) params.set("page", String(query.page));
+  if (query.page_size !== undefined) params.set("page_size", String(query.page_size));
+
+  const qs = params.toString();
+  const url = `${BASE}/runs/${runId}/report/sku-detail${qs ? `?${qs}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) await parseError(res, `getSkuDetail failed: ${res.status}`);
+  return res.json() as Promise<SkuDetailResponse>;
+}
+
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename="([^"]+)"/.exec(header);
+  return match?.[1] ?? null;
+}
+
+/** GET /runs/{runId}/export — download xlsx workbook or csv zip archive (T-5.3). */
+export async function exportRunReport(
+  runId: number,
+  format: ExportFormat,
+): Promise<void> {
+  const res = await fetch(`${BASE}/runs/${runId}/export?format=${format}`);
+  if (!res.ok) await parseError(res, `exportRunReport failed: ${res.status}`);
+
+  const blob = await res.blob();
+  const fallback =
+    format === "xlsx" ? `informe_run_${runId}.xlsx` : `informe_run_${runId}.zip`;
+  const filename =
+    parseContentDispositionFilename(res.headers.get("Content-Disposition")) ??
+    fallback;
+
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
 }

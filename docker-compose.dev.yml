@@ -1,0 +1,111 @@
+# Development Compose file — plan 3.8.2 (HTTP only; TLS added in T-6.1)
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d        # start
+#   docker compose -f docker-compose.dev.yml logs -f      # follow logs
+#   docker compose -f docker-compose.dev.yml down -v      # stop + remove volumes
+#
+# All secrets use safe defaults for local development.
+# Override any value with a .env file in this directory (already gitignored).
+#
+# Networks (plan 3.8.2 — web never reaches mysql directly):
+#   frontend: web ←→ api
+#   backend:  api ←→ mysql
+
+services:
+
+  # ── MySQL 8 ─────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_root_password}
+      MYSQL_DATABASE:      ${MYSQL_DATABASE:-conciliador_dev}
+      MYSQL_USER:          ${MYSQL_USER:-conciliador}
+      MYSQL_PASSWORD:      ${MYSQL_PASSWORD:-dev_password}
+    # utf8mb4 global charset and collation — plan 3.6
+    # utf8mb4_0900_ai_ci: default for data; utf8mb4_bin on cross-join cols is
+    # set at column level in migrations (T-1.6/T-1.7).
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --default-time-zone=+00:00
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      # mysqladmin ping sends COM_PING — no auth needed, pure connectivity probe
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+      start_period: 60s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── FastAPI + Uvicorn ────────────────────────────────────────────────────────
+  # entrypoint.sh (backend/Dockerfile) runs `alembic upgrade head` before uvicorn.
+  api:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+      # Tag locally so docker compose doesn't pull on every up
+      target: runtime
+    entrypoint: ["./entrypoint.sh"]
+    environment:
+      APP_ENV:      development
+      DEBUG:        "true"
+      DATABASE_URL: "mysql+aiomysql://${MYSQL_USER:-conciliador}:${MYSQL_PASSWORD:-dev_password}@mysql:3306/${MYSQL_DATABASE:-conciliador_dev}"
+      # Absolute path inside the container — appuser (uid 1001) owns this dir.
+      # Override with STAGING_DIR in your .env file if needed.
+      STAGING_DIR:  /app/data/staging
+    volumes:
+      # Named volume keeps uploaded files between container restarts / image rebuilds.
+      # The volume is initialised from the image path (/app/data/staging, owned by
+      # appuser:appgroup) on first mount, so write permissions are correct from the start.
+      - staging_data:/app/data/staging
+    # api may only start once MySQL is accepting connections (healthcheck green)
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+  # ── React SPA (Vite dev server + HMR) ────────────────────────────────────────
+  web:
+    build:
+      context:    ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    ports:
+      # Only port exposed to the host — API traffic flows through Vite's /api proxy
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      # Bind-mount source for Hot Reload; preserve image node_modules in an anonymous volume
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      # Vite proxy target inside the compose network (see vite.config.ts)
+      VITE_DEV_API_PROXY_TARGET: http://api:8000
+      CHOKIDAR_USEPOLLING:       "true"
+    depends_on:
+      - api
+    networks:
+      - frontend
+    restart: unless-stopped
+
+# ── Persistent volumes ──────────────────────────────────────────────────────
+volumes:
+  dbdata:
+    driver: local
+  # Uploaded source files — persists between restarts / image rebuilds.
+  staging_data:
+    driver: local
+
+# ── Internal networks ───────────────────────────────────────────────────────
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge

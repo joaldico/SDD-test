@@ -1,0 +1,21 @@
+# Files excluded from the Docker build context for the web image.
+
+# Dependencies folder — re-installed cleanly by npm ci inside the image
+node_modules/
+
+# Previous build output — rebuilt inside the image
+dist/
+
+# Version control
+.git/
+.gitignore
+
+# Documentation
+*.md
+
+# Environment secrets (never bake into image)
+.env
+.env.*
+
+# Test coverage
+coverage/

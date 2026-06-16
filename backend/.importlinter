@@ -1,0 +1,36 @@
+[importlinter]
+root_package = marketplace_conciliator
+include_external_packages = True
+
+# ── Contract 1: domain-isolation ─────────────────────────────────────────────
+# The five domain modules must not import from each other (ADR-001).
+# They may only import from:
+#   - marketplace_conciliator.settings  (shared 12-factor config)
+#   - stdlib and third-party packages
+# The `platform` module is the composition root and is intentionally excluded
+# from this contract because it wires all domain modules together.
+[importlinter:contract:domain-isolation]
+name = Domain modules are isolated from each other (ADR-001)
+type = independence
+modules =
+    marketplace_conciliator.auth
+    marketplace_conciliator.ingestion
+    marketplace_conciliator.mapping
+    marketplace_conciliator.reconciliation
+    marketplace_conciliator.reporting
+
+
+# ── Contract 2: platform-is-top-layer ────────────────────────────────────────
+# No domain module may import from `platform` (the wiring layer sits above them,
+# not the other way around).
+[importlinter:contract:platform-is-top-layer]
+name = Domain modules do not import from the platform layer (ADR-001)
+type = forbidden
+source_modules =
+    marketplace_conciliator.auth
+    marketplace_conciliator.ingestion
+    marketplace_conciliator.mapping
+    marketplace_conciliator.reconciliation
+    marketplace_conciliator.reporting
+forbidden_modules =
+    marketplace_conciliator.platform

@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+
+  # ── MySQL 8 ─────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-prod_root_password}
+      MYSQL_DATABASE:      ${MYSQL_DATABASE:-conciliador_dev}
+      MYSQL_USER:          ${MYSQL_USER:-conciliador}
+      MYSQL_PASSWORD:      ${MYSQL_PASSWORD:-dev_password}
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --default-time-zone=+00:00
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+      start_period: 60s
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ── FastAPI + Uvicorn ────────────────────────────────────────────────────────
+  api:
+    image: ${DOCKER_USERNAME}/conciliador-api:latest
+    entrypoint: ["./entrypoint.sh"]
+    environment:
+      APP_ENV:      production
+      DEBUG:        "false"
+      DATABASE_URL: "mysql+aiomysql://${MYSQL_USER:-conciliador}:${MYSQL_PASSWORD:-prod_password}@mysql:3306/${MYSQL_DATABASE:-conciliador_dev}"
+      STAGING_DIR:  /app/data/staging
+    ports:
+      - "8003:8000"
+    volumes:
+      - staging_data:/app/data/staging
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+  # ── React SPA (Nginx) ────────────────────────────────────────────────────────
+  web:
+    image: ${DOCKER_USERNAME}/conciliador-web:latest
+    ports:
+      - "3004:80"
+    environment:
+      VITE_API_URL: http://${EC2_HOST}:8003/api/v1
+    depends_on:
+      - api
+    networks:
+      - frontend
+    restart: unless-stopped
+
+# ── Persistent volumes ──────────────────────────────────────────────────────
+volumes:
+  dbdata:
+    driver: local
+  staging_data:
+    driver: local
+
+# ── Internal networks ───────────────────────────────────────────────────────
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge

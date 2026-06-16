@@ -1,0 +1,72 @@
+name: Deploy Conciliador to EC2 via Docker Hub
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Build, Push and Deploy
+    runs-on: ubuntu-latest
+    environment: DEPLOY 
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      # 1. Construir y subir imagen del API a Docker Hub
+      - name: Build and Push API Image
+        run: |
+          docker build --target runtime -t ${{ secrets.DOCKER_USERNAME }}/conciliador-api:latest ./backend
+          docker push ${{ secrets.DOCKER_USERNAME }}/conciliador-api:latest
+
+      # 2. Construir y subir imagen del Web a Docker Hub
+      - name: Build and Push Web Image
+        run: |
+          docker build --target runtime -t ${{ secrets.DOCKER_USERNAME }}/conciliador-web:latest ./frontend
+          docker push ${{ secrets.DOCKER_USERNAME }}/conciliador-web:latest
+
+      # 3. Copiar SOLO el archivo docker-compose al servidor (Sin usar git clone)
+      - name: Copy docker-compose via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "docker-compose.prod.yml"
+          target: "/home/${{ secrets.EC2_USER }}/marketplace-conciliator"
+
+      # 4. Entrar por SSH, descargar imágenes frescas y levantar
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Entrar a la carpeta donde SCP dejó el archivo
+            mkdir -p /home/${{ secrets.EC2_USER }}/marketplace-conciliator
+            cd /home/${{ secrets.EC2_USER }}/marketplace-conciliator
+            
+            # Exportar variables de entorno para Docker Compose
+            export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+            export SECRET_KEY="${{ secrets.SECRET_KEY }}"
+            export EC2_HOST="${{ secrets.EC2_HOST }}"
+            export DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+            
+            # Autenticarse en Docker Hub (por si el repo es privado)
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            
+            # Descargar imágenes nuevas y levantar
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            
+            # Ejecutar migraciones de base de datos
+            docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
+            
+            # Limpiar imágenes viejas
+            docker image prune -f

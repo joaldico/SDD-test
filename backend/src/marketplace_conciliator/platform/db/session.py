@@ -28,6 +28,15 @@ def _get_session_factory() -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def get_session_factory() -> sessionmaker[Session]:
+    """Return the cached sessionmaker instance (public API for background threads).
+
+    Background tasks (e.g. TaskRunner) use this to create per-thread sessions
+    outside the FastAPI dependency-injection lifecycle.
+    """
+    return _get_session_factory()
+
+
 def get_db() -> Generator[Session, None, None]:
     """FastAPI dependency that yields a synchronous SQLAlchemy session."""
     factory = _get_session_factory()

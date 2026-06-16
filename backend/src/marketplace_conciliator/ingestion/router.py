@@ -966,12 +966,14 @@ class CatalogHealthResponse(BaseModel):
     run_id: int
     items: list[CatalogHealthItem]
     total: int
+    page: int
+    page_size: int
 
 
 @router.get(
     "/{run_id}/catalog-health",
     response_model=CatalogHealthResponse,
-    summary="Vista 3 — Salud de catálogo (spec 2.7, T-4.3)",
+    summary="Vista 3 — Salud de catálogo (spec 2.7, T-4.3 / T-5.2)",
 )
 def catalog_health(
     run_id: int,
@@ -980,17 +982,39 @@ def catalog_health(
         str | None,
         Query(description="Filter by sync_status (e.g. DESYNC_FEED_ONLY)"),
     ] = None,
+    page: Annotated[int, Query(ge=1, description="Page number (1-based)")] = 1,
+    page_size: Annotated[
+        int,
+        Query(ge=1, le=500, description="Items per page; omit by passing a large value"),
+    ] = 500,
 ) -> CatalogHealthResponse:
-    """Return run_items ordered by priority (sync_status) then feed_stock DESC.
+    """Return run_items ordered by priority (sync_status) then conflicts, then feed_stock DESC.
 
     Default ordering follows spec 2.7: highest-priority status first,
-    within each status ordered by feed_stock DESC (active stock loss first).
+    stock conflicts highlighted before non-conflicting rows within the same status,
+    then feed_stock DESC (active stock loss first).
     Optional ``sync_status`` query param filters to a single classification.
     """
     run = db.get(ReconciliationRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
+    if run.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Catalog health not ready for run {run_id} (status={run.status}).",
+        )
 
+    count_query = sa_text("""
+        SELECT COUNT(*)
+        FROM run_items
+        WHERE run_id = :run_id
+          AND (:sync_status IS NULL OR sync_status = :sync_status)
+    """)
+    total = int(
+        db.execute(count_query, {"run_id": run_id, "sync_status": sync_status}).scalar_one(),
+    )
+
+    offset = (page - 1) * page_size
     query = sa_text("""
         SELECT sku_norm, sku_raw, sync_status,
                feed_stock, occ_stock, stock_conflict,
@@ -1007,10 +1031,21 @@ def catalog_health(
                 WHEN 'SENT_OK'            THEN 5
                 ELSE 9
             END ASC,
-            COALESCE(feed_stock, 0) DESC
+            stock_conflict DESC,
+            COALESCE(feed_stock, 0) DESC,
+            sku_norm ASC
+        LIMIT :limit OFFSET :offset
     """)
 
-    rows = db.execute(query, {"run_id": run_id, "sync_status": sync_status}).fetchall()
+    rows = db.execute(
+        query,
+        {
+            "run_id": run_id,
+            "sync_status": sync_status,
+            "limit": page_size,
+            "offset": offset,
+        },
+    ).fetchall()
 
     items = [
         CatalogHealthItem(
@@ -1028,7 +1063,13 @@ def catalog_health(
         for row in rows
     ]
 
-    return CatalogHealthResponse(run_id=run_id, items=items, total=len(items))
+    return CatalogHealthResponse(
+        run_id=run_id,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 # ---------------------------------------------------------------------------

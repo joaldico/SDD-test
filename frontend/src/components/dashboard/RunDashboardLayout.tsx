@@ -1,20 +1,32 @@
 /**
- * RunDashboardLayout — base shell for the reconciliation report dashboard (T-5.1).
+ * RunDashboardLayout — base shell for the reconciliation report dashboard (T-5.1 / T-5.2).
  *
- * Renders the three primary KPI cards requested for the dashboard shell:
- * Total SKUs, Errores and Desincronizados.
+ * Renders KPI cards plus Vista 1 (familias) and Vista 3 (catálogo).
  */
 
 import type { JSX } from "react";
+import { CatalogHealthTable } from "./CatalogHealthTable";
+import { FamilyErrorsTable } from "./FamilyErrorsTable";
 import { SummaryMetricCard } from "./SummaryMetricCard";
-import type { RunMetricsResponse } from "../../types/reporting";
+import type {
+  CatalogHealthResponse,
+  FamiliesReportResponse,
+  RunMetricsResponse,
+} from "../../types/reporting";
 
 interface Props {
   runId: number;
   metrics: RunMetricsResponse;
+  families: FamiliesReportResponse;
+  catalog: CatalogHealthResponse;
 }
 
-export function RunDashboardLayout({ runId, metrics }: Props): JSX.Element {
+export function RunDashboardLayout({
+  runId,
+  metrics,
+  families,
+  catalog,
+}: Props): JSX.Element {
   const { summary } = metrics;
 
   return (
@@ -56,10 +68,8 @@ export function RunDashboardLayout({ runId, metrics }: Props): JSX.Element {
         />
       </section>
 
-      <p style={styles.placeholder}>
-        Las vistas detalladas por familia, SKU y salud del catálogo se añadirán
-        en las siguientes tareas del hito M5.
-      </p>
+      <FamilyErrorsTable report={families} />
+      <CatalogHealthTable catalog={catalog} />
     </div>
   );
 }
@@ -68,7 +78,7 @@ const styles = {
   container: {
     display: "flex",
     flexDirection: "column" as const,
-    gap: "24px",
+    gap: "32px",
   },
   header: {
     display: "flex",
@@ -90,13 +100,5 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
     gap: "16px",
-  },
-  placeholder: {
-    fontSize: "13px",
-    color: "var(--color-text-muted)",
-    margin: 0,
-    padding: "16px",
-    backgroundColor: "var(--color-primary-light)",
-    borderRadius: "var(--radius-md)",
   },
 } as const;

@@ -1,28 +1,40 @@
 /**
- * Step6Dashboard — T-5.1 report shell (wizard step 6).
+ * Step6Dashboard — T-5.1 / T-5.2 report shell (wizard step 6).
  *
- * Fetches GET /runs/{id}/metrics and renders the dashboard layout with
- * summary KPI cards for the completed reconciliation run.
+ * Fetches metrics, families report and catalog health for the completed run.
  */
 
 import { useEffect, useState, type JSX } from "react";
 import { RunDashboardLayout } from "../../dashboard/RunDashboardLayout";
-import type { RunMetricsResponse } from "../../../types/reporting";
+import type {
+  CatalogHealthResponse,
+  FamiliesReportResponse,
+  RunMetricsResponse,
+} from "../../../types/reporting";
 
 interface Props {
   runId: number;
   onFetchMetrics: () => Promise<RunMetricsResponse>;
+  onFetchFamilies: () => Promise<FamiliesReportResponse>;
+  onFetchCatalog: () => Promise<CatalogHealthResponse>;
   onBack?: () => void;
 }
 
 type ScreenState =
   | { kind: "loading" }
-  | { kind: "ready"; metrics: RunMetricsResponse }
+  | {
+      kind: "ready";
+      metrics: RunMetricsResponse;
+      families: FamiliesReportResponse;
+      catalog: CatalogHealthResponse;
+    }
   | { kind: "error"; message: string };
 
 export function Step6Dashboard({
   runId,
   onFetchMetrics,
+  onFetchFamilies,
+  onFetchCatalog,
   onBack,
 }: Props): JSX.Element {
   const [screen, setScreen] = useState<ScreenState>({ kind: "loading" });
@@ -32,14 +44,18 @@ export function Step6Dashboard({
 
     const load = async () => {
       try {
-        const metrics = await onFetchMetrics();
+        const [metrics, families, catalog] = await Promise.all([
+          onFetchMetrics(),
+          onFetchFamilies(),
+          onFetchCatalog(),
+        ]);
         if (!cancelled) {
-          setScreen({ kind: "ready", metrics });
+          setScreen({ kind: "ready", metrics, families, catalog });
         }
       } catch (err) {
         if (!cancelled) {
           const message =
-            err instanceof Error ? err.message : "No se pudieron cargar las métricas";
+            err instanceof Error ? err.message : "No se pudo cargar el informe";
           setScreen({ kind: "error", message });
         }
       }
@@ -50,7 +66,7 @@ export function Step6Dashboard({
     return () => {
       cancelled = true;
     };
-  }, [onFetchMetrics]);
+  }, [onFetchMetrics, onFetchFamilies, onFetchCatalog]);
 
   if (screen.kind === "loading") {
     return (
@@ -76,7 +92,12 @@ export function Step6Dashboard({
 
   return (
     <div data-testid="step6-dashboard">
-      <RunDashboardLayout runId={runId} metrics={screen.metrics} />
+      <RunDashboardLayout
+        runId={runId}
+        metrics={screen.metrics}
+        families={screen.families}
+        catalog={screen.catalog}
+      />
       {onBack ? (
         <div style={styles.footer}>
           <button type="button" style={styles.backButton} onClick={onBack}>

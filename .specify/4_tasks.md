@@ -103,12 +103,12 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 
 ### M5 — Dashboard y Reportes: Informe, Exportación e Histórico (gate: CA-05 verde) 🔵 **En progreso**
 
-> **Inicio:** 2026-06-16. Próxima tarea en cola: **T-5.1** (Vista 1 — agregado por familia).
+> **Inicio:** 2026-06-16. Próxima tarea en cola: **T-5.3** (exportación xlsx/csv).
 
 | ID | Estado | Tarea | Traza a | Dep. | Est. | DoD específico |
 |---|---|---|---|---|---|---|
-| T-5.1 | 🔵 | Endpoint **Vista 1** `GET .../report/families` (agregado por familia con drill-down a códigos y de ahí a SKUs) | RF-08, RF-14 | M4 | M | Test contra run de fixtures: familia `AUTORIZACION_MARCA` agrega 18299+18749+…; familia vacía no aparece; `SIN_CLASIFICAR` visible con aviso si tiene contenido |
-| T-5.2 | ⏳ | Endpoints **Vista 2** `sku-detail` (filtros family/code/sync_status, paginación) y **Vista 3** `catalog-health` (desync orden `stock DESC`, not_sent, duplicates) | RF-08, OBJ-07/08 | T-5.1 | M | Tests: orden por stock desc verificado; paginación estable; filtros combinables |
+| T-5.1 | [x] | **Dashboard shell** `GET .../metrics` + frontend Step 6 con tarjetas KPI (Total SKUs, Errores, Desincronizados) | RF-08, RF-14 | M4 | M | Test TDD verde — `GET /metrics` + `RunDashboardLayout` con 3 tarjetas; vitest Step6Dashboard en verde |
+| T-5.2 | [x] | Endpoint **Vista 1** `GET .../report/families` + **Vista 3** `GET .../catalog-health` (detalle SKU, conflictos priorizados) + tablas en dashboard Step 6 | RF-08, RF-14, OBJ-07/08 | T-5.1 | M | Tests: agregación por familia/código; orden stock_conflict + stock DESC; paginación estable; tablas frontend bajo tarjetas KPI |
 | T-5.3 | ⏳ | **Exportación** `GET .../export?format=xlsx|csv`: libro con 3 pestañas replicando las vistas | RF-09 | T-5.2 | M | **BDD CA-05 verde completo** (incluido el escenario de exportación); xlsx de fixtures abre con 3 pestañas y conteos correctos |
 | T-5.4 | ⏳ | Frontend: **dashboard de informe en 3 tabs** con drill-down familia→código→SKUs y botones de export | RF-08, spec 2.1 | T-5.3 | L | E2E: flujo completo upload→mapeo→proceso→informe→descarga sobre fixtures reales |
 | T-5.5 | ⏳ | **Histórico**: `GET /runs` paginado + reapertura de informe de runs pasadas + **mapeo recordado** por huella de cabeceras ofrecido como predeterminado | RF-12, RF-13 | T-5.4 | M | Tests: segunda run con mismos ficheros pre-rellena el mapeo (marcado como sugerencia, sigue exigiendo confirmación — OBJ-03); informe de run antigua accesible |

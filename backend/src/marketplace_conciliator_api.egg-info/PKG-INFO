@@ -5,6 +5,8 @@ Summary: Backend API for the marketplace publication error conciliator.
 Requires-Python: >=3.12
 Requires-Dist: alembic>=1.15
 Requires-Dist: fastapi[standard]>=0.136
+Requires-Dist: pandas>=2.2
+Requires-Dist: openpyxl>=3.1
 Requires-Dist: pydantic-settings>=2.14
 Requires-Dist: pymysql>=1.1
 Requires-Dist: sqlalchemy[asyncio]>=2.0
@@ -13,7 +15,7 @@ Requires-Dist: anyio>=4.13; extra == "dev"
 Requires-Dist: httpx2>=2.4; extra == "dev"
 Requires-Dist: import-linter>=2.11; extra == "dev"
 Requires-Dist: mypy>=1.15; extra == "dev"
-Requires-Dist: openpyxl>=3.1; extra == "dev"
+Requires-Dist: pandas-stubs>=2.2; extra == "dev"
 Requires-Dist: pre-commit>=4; extra == "dev"
 Requires-Dist: pytest>=9; extra == "dev"
 Requires-Dist: pytest-anyio>=0.0; extra == "dev"

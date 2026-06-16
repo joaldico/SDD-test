@@ -151,6 +151,16 @@ export function ConciliacionPage(): JSX.Element {
     return reportingApi.getRunMetrics(state.runId);
   };
 
+  const handleFetchFamilies = async () => {
+    if (state.runId === null) throw new Error("No hay un run activo");
+    return reportingApi.getFamiliesReport(state.runId);
+  };
+
+  const handleFetchCatalog = async () => {
+    if (state.runId === null) throw new Error("No hay un run activo");
+    return reportingApi.getCatalogHealth(state.runId, { page: 1, page_size: 50 });
+  };
+
   const handleViewDashboard = (): void => {
     dispatch({ type: "SET_STEP", step: 6 });
   };
@@ -235,6 +245,8 @@ export function ConciliacionPage(): JSX.Element {
           <Step6Dashboard
             runId={state.runId}
             onFetchMetrics={handleFetchMetrics}
+            onFetchFamilies={handleFetchFamilies}
+            onFetchCatalog={handleFetchCatalog}
             onBack={goTo(5)}
           />
         )}
@@ -249,7 +261,7 @@ const styles = {
     minHeight: "100%",
   },
   inner: {
-    maxWidth: "900px",
+    maxWidth: "1100px",
     margin: "0 auto",
     backgroundColor: "var(--color-surface)",
     borderRadius: "var(--radius-lg)",

@@ -187,6 +187,34 @@ describe("useWizardState", () => {
     expect(f.selectedSheet).toBe("Hoja2");
   });
 
+  it("PREVIEW_LOADED prefers remembered_mappings over heuristic suggestions", () => {
+    const { result } = renderHook(() => useWizardState());
+    const previewWithRemembered: PreviewResponse = {
+      ...mockPreview,
+      suggestions: {
+        sku: { column_index: 2, confidence: 0.5, reason: "heuristic" },
+      },
+      remembered_mappings: {
+        sku: {
+          column_index: 0,
+          from_run_id: 5,
+          reason: "Mapeo confirmado en ejecución #5",
+        },
+      },
+    };
+
+    act(() => {
+      result.current.dispatch({
+        type: "PREVIEW_LOADED",
+        role: "occ_top",
+        preview: previewWithRemembered,
+      });
+    });
+
+    expect(result.current.state.files.occ_top.pendingMappings.sku).toBe(0);
+    expect(result.current.state.files.occ_top.mappingConfirmed).toBe(false);
+  });
+
   it("SET_RUN_ID stores the run id", () => {
     const { result } = renderHook(() => useWizardState());
     act(() => {

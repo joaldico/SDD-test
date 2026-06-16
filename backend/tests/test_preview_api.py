@@ -90,10 +90,24 @@ with _engine.begin() as conn:
             detected_delimiter  TEXT,
             sheet_name          TEXT,
             data_start_row      INTEGER,
+            header_fingerprint  TEXT,
             total_rows          INTEGER NOT NULL DEFAULT 0,
             discarded_rows      INTEGER NOT NULL DEFAULT 0,
             uploaded_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (run_id, role)
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS column_mappings (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_file_id      INTEGER NOT NULL REFERENCES source_files(id),
+            logical_field       TEXT NOT NULL,
+            source_column_name  TEXT NOT NULL,
+            source_column_index INTEGER NOT NULL,
+            was_suggested       INTEGER NOT NULL DEFAULT 0,
+            confirmed_by        INTEGER NOT NULL REFERENCES users(id),
+            confirmed_at        DATETIME NOT NULL,
+            UNIQUE (source_file_id, logical_field)
         )
     """))
     conn.execute(text("""

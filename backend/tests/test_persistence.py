@@ -103,6 +103,7 @@ with _ENGINE.begin() as _c:
             detected_delimiter TEXT,
             sheet_name TEXT,
             data_start_row INTEGER,
+            header_fingerprint TEXT,
             total_rows INTEGER NOT NULL DEFAULT 0,
             discarded_rows INTEGER NOT NULL DEFAULT 0,
             uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,

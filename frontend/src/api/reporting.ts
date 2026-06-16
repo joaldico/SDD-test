@@ -7,6 +7,8 @@ import type {
   CatalogHealthResponse,
   ExportFormat,
   FamiliesReportResponse,
+  RunHistoryListResponse,
+  RunHistoryQuery,
   RunMetricsResponse,
   SkuDetailQuery,
   SkuDetailResponse,
@@ -23,6 +25,22 @@ async function parseError(res: Response, fallback: string): Promise<never> {
     // ignore parse failure
   }
   throw new Error(detail);
+}
+
+/** GET /runs — paginated reconciliation run history (T-5.5, RF-13). */
+export async function listRuns(
+  query: RunHistoryQuery = {},
+): Promise<RunHistoryListResponse> {
+  const params = new URLSearchParams();
+  if (query.page !== undefined) params.set("page", String(query.page));
+  if (query.size !== undefined) params.set("size", String(query.size));
+  if (query.status) params.set("status", query.status);
+
+  const qs = params.toString();
+  const url = `${BASE}/runs${qs ? `?${qs}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) await parseError(res, `listRuns failed: ${res.status}`);
+  return res.json() as Promise<RunHistoryListResponse>;
 }
 
 /** GET /runs/{runId}/metrics — dashboard KPIs for a completed run. */

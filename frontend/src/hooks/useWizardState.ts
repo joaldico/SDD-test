@@ -168,11 +168,14 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
       });
 
     case "PREVIEW_LOADED": {
-      // Pre-fill pendingMappings from heuristic suggestions
       const suggestions = action.preview.suggestions;
+      const remembered = action.preview.remembered_mappings ?? {};
       const preFilled = Object.fromEntries(
-        Object.entries(suggestions).map(([field, s]) => [field, s.column_index])
+        Object.entries(suggestions).map(([field, s]) => [field, s.column_index]),
       );
+      for (const [field, rememberedMapping] of Object.entries(remembered)) {
+        preFilled[field] = rememberedMapping.column_index;
+      }
       return updateFile(state, action.role, {
         previewStatus: "loaded",
         preview: action.preview,

@@ -102,3 +102,27 @@ export interface SkuDetailQuery {
 }
 
 export type ExportFormat = "xlsx" | "csv";
+
+/** Types for GET /runs — T-5.5 run history (RF-13) */
+
+export interface RunHistoryItem {
+  id: number;
+  marketplace: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  summary_metrics: Record<string, number> | null;
+}
+
+export interface RunHistoryListResponse {
+  items: RunHistoryItem[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface RunHistoryQuery {
+  page?: number;
+  size?: number;
+  status?: string;
+}

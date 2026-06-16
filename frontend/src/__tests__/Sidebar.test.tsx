@@ -48,9 +48,15 @@ describe("Sidebar", () => {
     expect(screen.getByText(/administración/i)).toBeInTheDocument();
   });
 
-  it("marks future modules as coming-soon", () => {
+  it("marks Administración as coming-soon", () => {
     renderSidebar();
     const badges = screen.getAllByText(/próximamente/i);
     expect(badges.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders Histórico as an active link", () => {
+    renderSidebar();
+    const link = screen.getByRole("link", { name: /histórico/i });
+    expect(link).toHaveAttribute("href", "/historico");
   });
 });

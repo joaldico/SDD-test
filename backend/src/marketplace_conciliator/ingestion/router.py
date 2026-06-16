@@ -48,6 +48,8 @@ from marketplace_conciliator.ingestion.deduplicator import (
     deduplicate_occ,
 )
 from marketplace_conciliator.ingestion.excel_parser import ExcelParser
+from marketplace_conciliator.ingestion.header_fingerprint import compute_header_fingerprint
+from marketplace_conciliator.ingestion.remembered_mapping import lookup_remembered_mappings
 from marketplace_conciliator.ingestion.sku_normalizer import normalise_sku
 from marketplace_conciliator.platform.db.models.runs import (
     ColumnMapping,
@@ -208,6 +210,14 @@ class PreviewWarning(BaseModel):
     row: int | None = None
 
 
+class RememberedMappingSchema(BaseModel):
+    """Previously confirmed mapping offered as default (RF-12, T-5.5)."""
+
+    column_index: int
+    from_run_id: int
+    reason: str
+
+
 class PreviewResponse(BaseModel):
     """Contract for GET .../preview — plan 3.7."""
 
@@ -218,6 +228,7 @@ class PreviewResponse(BaseModel):
     headers: list[HeaderInfo]
     sample_rows: list[list[str]]
     suggestions: dict[str, ColumnSuggestionSchema]
+    remembered_mappings: dict[str, RememberedMappingSchema] = {}
     warnings: list[PreviewWarning]
     discarded_rows: int
 
@@ -429,13 +440,45 @@ def preview_file(
         )
 
     if ext in _EXCEL_EXTENSIONS:
-        return _preview_excel(source_file, staging_path, sheet)
-    if ext in _CSV_EXTENSIONS:
-        return _preview_csv(source_file, staging_path)
+        response = _preview_excel(source_file, staging_path, sheet)
+    elif ext in _CSV_EXTENSIONS:
+        response = _preview_csv(source_file, staging_path)
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file extension '{ext}' for preview.",
+        )
 
-    raise HTTPException(
-        status_code=422,
-        detail=f"Unsupported file extension '{ext}' for preview.",
+    return _attach_remembered_mappings(db, source_file, response)
+
+
+def _attach_remembered_mappings(
+    db: Session,
+    source_file: SourceFile,
+    response: PreviewResponse,
+) -> PreviewResponse:
+    """Merge remembered mappings from prior runs with the same header fingerprint."""
+    fingerprint = compute_header_fingerprint([h.name for h in response.headers])
+    remembered = lookup_remembered_mappings(
+        db,
+        role=source_file.role,
+        header_fingerprint=fingerprint,
+        exclude_source_file_id=source_file.id,
+    )
+    if not remembered:
+        return response
+
+    return response.model_copy(
+        update={
+            "remembered_mappings": {
+                field: RememberedMappingSchema(
+                    column_index=m.column_index,
+                    from_run_id=m.from_run_id,
+                    reason=m.reason,
+                )
+                for field, m in remembered.items()
+            },
+        },
     )
 
 
@@ -449,7 +492,7 @@ def preview_file(
     response_model=MappingResponse,
     summary="Confirm column mapping for a source file",
 )
-def create_mapping(  # noqa: PLR0913
+def create_mapping(  # noqa: C901, PLR0913
     run_id: int,
     file_id: int,
     body: MappingRequest,
@@ -561,6 +604,11 @@ def create_mapping(  # noqa: PLR0913
     # Advance run status: uploaded → mapping (first time any mapping is confirmed)
     if run.status == "uploaded" and body.mappings:
         run.status = "mapping"
+
+    if body.mappings:
+        source_file.header_fingerprint = compute_header_fingerprint(
+            [str(col) for col in df.columns],
+        )
 
     db.commit()
 

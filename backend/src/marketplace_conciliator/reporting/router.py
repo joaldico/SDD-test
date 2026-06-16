@@ -1,6 +1,7 @@
-"""Reporting API router — T-5.1 dashboard metrics + T-5.2 report views + T-5.3 export.
+"""Reporting API router — dashboard, report views, export and run history (T-5.x).
 
 Endpoints:
+  GET /api/v1/runs                           Paginated run history (RF-13).
   GET /api/v1/runs/{run_id}/metrics          Dashboard KPIs for a completed run.
   GET /api/v1/runs/{run_id}/report/families  Vista 1 — errors grouped by family.
   GET /api/v1/runs/{run_id}/export           xlsx/csv export replicating the 3 views.
@@ -9,7 +10,7 @@ Endpoints:
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 — used at runtime in response mapping
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -34,6 +35,86 @@ from marketplace_conciliator.reporting.metrics import (
 )
 
 router = APIRouter(prefix="/runs", tags=["reporting"])
+
+
+class RunHistoryItemResponse(BaseModel):
+    """One entry in the paginated run history list (RF-13)."""
+
+    id: int
+    marketplace: str
+    status: str
+    created_at: datetime
+    completed_at: datetime | None
+    summary_metrics: dict[str, Any] | None
+
+
+class RunHistoryListResponse(BaseModel):
+    """Paginated envelope for GET /runs (plan 3.7)."""
+
+    items: list[RunHistoryItemResponse]
+    total: int
+    page: int
+    size: int
+
+
+@router.get(
+    "",
+    response_model=RunHistoryListResponse,
+    summary="List reconciliation runs with pagination (T-5.5, RF-13)",
+)
+def list_runs(
+    db: Annotated[Session, Depends(get_db)],
+    page: Annotated[int, Query(ge=1, description="Page number (1-based)")] = 1,
+    size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 20,
+    status: Annotated[
+        str | None,
+        Query(description="Filter by run status (e.g. completed)"),
+    ] = None,
+) -> RunHistoryListResponse:
+    """Return paginated run history ordered by created_at descending."""
+    count_query = sa_text("""
+        SELECT COUNT(*)
+        FROM reconciliation_runs
+        WHERE (:status IS NULL OR status = :status)
+    """)
+    total = int(db.execute(count_query, {"status": status}).scalar_one())
+
+    offset = (page - 1) * size
+    rows = db.execute(
+        sa_text("""
+            SELECT id, marketplace, status, created_at, completed_at, summary_metrics
+            FROM reconciliation_runs
+            WHERE (:status IS NULL OR status = :status)
+            ORDER BY created_at DESC, id DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        {"status": status, "limit": size, "offset": offset},
+    ).fetchall()
+
+    items: list[RunHistoryItemResponse] = []
+    for row in rows:
+        metrics: dict[str, Any] | None = None
+        raw_metrics = row[5]
+        if raw_metrics is not None:
+            if isinstance(raw_metrics, str):
+                import json  # noqa: PLC0415
+
+                metrics = json.loads(raw_metrics)
+            else:
+                metrics = raw_metrics
+
+        items.append(
+            RunHistoryItemResponse(
+                id=int(row[0]),
+                marketplace=str(row[1]),
+                status=str(row[2]),
+                created_at=row[3],
+                completed_at=row[4],
+                summary_metrics=metrics,
+            ),
+        )
+
+    return RunHistoryListResponse(items=items, total=total, page=page, size=size)
 
 
 class DashboardSummaryResponse(BaseModel):

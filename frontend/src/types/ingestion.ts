@@ -93,8 +93,15 @@ export interface PreviewResponse {
   headers: HeaderInfo[];
   sample_rows: string[][];
   suggestions: Record<string, ColumnSuggestion>;
+  remembered_mappings?: Record<string, RememberedMapping>;
   warnings: PreviewWarning[];
   discarded_rows: number;
+}
+
+export interface RememberedMapping {
+  column_index: number;
+  from_run_id: number;
+  reason: string;
 }
 
 // ---------------------------------------------------------------------------

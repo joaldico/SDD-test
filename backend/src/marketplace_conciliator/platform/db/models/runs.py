@@ -96,6 +96,10 @@ class SourceFile(Base):
     detected_delimiter: Mapped[str | None] = mapped_column(String(8), nullable=True)
     sheet_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     data_start_row: Mapped[int | None] = mapped_column(INTEGER(unsigned=True), nullable=True)
+    header_fingerprint: Mapped[str | None] = mapped_column(
+        CHAR(64, charset="ascii", collation="ascii_bin"),
+        nullable=True,
+    )
     total_rows: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
     discarded_rows: Mapped[int] = mapped_column(INTEGER(unsigned=True), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(DATETIME(fsp=6), nullable=False)

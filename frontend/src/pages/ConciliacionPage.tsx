@@ -109,7 +109,8 @@ export function ConciliacionPage(): JSX.Element {
       logical_field,
       column_index,
       was_suggested:
-        preview.suggestions[logical_field]?.column_index === column_index,
+        preview.suggestions[logical_field]?.column_index === column_index ||
+        preview.remembered_mappings?.[logical_field]?.column_index === column_index,
     }));
 
     try {

@@ -12,7 +12,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { path: "/",               label: "Dashboard",      icon: "▣" },
   { path: "/conciliacion",   label: "Conciliación",   icon: "⇄" },
-  { path: "/historico",      label: "Histórico",      icon: "◷", comingSoon: true },
+  { path: "/historico",      label: "Histórico",      icon: "◷" },
   { path: "/admin",          label: "Administración", icon: "⚙", comingSoon: true },
 ];
 
@@ -59,7 +59,7 @@ export function Sidebar(): JSX.Element {
 
       {/* Footer */}
       <div style={styles.footer}>
-        <span style={styles.version}>v0.3.0 · M3</span>
+        <span style={styles.version}>v0.5.0 · M5</span>
       </div>
     </aside>
   );

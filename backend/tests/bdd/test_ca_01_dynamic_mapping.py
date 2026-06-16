@@ -154,6 +154,50 @@ with _engine.begin() as _conn:
             UNIQUE (run_id, sku_norm)
         )
     """))
+    # duplicate_findings: deduplication audit (T-4.2)
+    _conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS duplicate_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_file_id INTEGER NOT NULL REFERENCES source_files(id),
+            sku_norm TEXT NOT NULL,
+            occurrences INTEGER NOT NULL,
+            resolution TEXT NOT NULL,
+            discarded_values TEXT NOT NULL
+        )
+    """))
+    # error_families + error_codes + item_errors: required by T-4.2 trigger_process
+    _conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS error_families (
+            code TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            description TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 99
+        )
+    """))
+    _conn.execute(text("""
+        INSERT OR IGNORE INTO error_families (code, display_name, sort_order)
+        VALUES ('SIN_CLASIFICAR', 'Sin clasificar', 99)
+    """))
+    _conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS error_codes (
+            code TEXT PRIMARY KEY,
+            family_code TEXT NOT NULL DEFAULT 'SIN_CLASIFICAR'
+                REFERENCES error_families(code),
+            default_category TEXT,
+            canonical_message TEXT,
+            first_seen_at DATETIME
+        )
+    """))
+    _conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS item_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_item_id INTEGER NOT NULL REFERENCES run_items(id),
+            error_code TEXT NOT NULL REFERENCES error_codes(code),
+            error_category TEXT NOT NULL DEFAULT 'ERROR',
+            error_message TEXT NOT NULL,
+            affected_field TEXT
+        )
+    """))
     _conn.execute(
         text("INSERT OR IGNORE INTO users (id, email, role, hashed_password) "
              "VALUES (:id, :email, :role, 'dummy')"),

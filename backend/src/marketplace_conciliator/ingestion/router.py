@@ -1,4 +1,6 @@
-"""Ingestion API router — T-3.6, T-3.7, T-3.8, T-3.10 (gate BDD CA-01).
+"""Ingestion API router — T-3.6/T-3.7/T-3.8/T-3.10 (gate CA-01) + T-4.2 (gate CA-03).
+
+Deduplication (spec 2.6) and ``duplicate_findings`` persistence added in T-4.2.
 
 Endpoints:
   POST /api/v1/runs                              Create a new reconciliation run.
@@ -33,6 +35,12 @@ from sqlalchemy.orm import Session  # noqa: TC002
 from marketplace_conciliator.ingestion.block_locator import BlockLocator, BlockNotFoundError
 from marketplace_conciliator.ingestion.column_suggester import ColumnSuggester
 from marketplace_conciliator.ingestion.csv_parser import CsvParser
+from marketplace_conciliator.ingestion.deduplicator import (
+    DuplicateFindingData,
+    deduplicate_amazon_errors,
+    deduplicate_feed,
+    deduplicate_occ,
+)
 from marketplace_conciliator.ingestion.excel_parser import ExcelParser
 from marketplace_conciliator.ingestion.sku_normalizer import normalise_sku
 from marketplace_conciliator.platform.db.models.runs import (
@@ -525,7 +533,7 @@ def create_mapping(  # noqa: PLR0913
 
 
 # ---------------------------------------------------------------------------
-# Endpoint — T-3.10 / Gate CA-01: POST /runs/{run_id}/process
+# Endpoint — T-3.10 gate CA-01 / T-4.2 gate CA-03
 # ---------------------------------------------------------------------------
 
 
@@ -535,29 +543,49 @@ class ProcessResponse(BaseModel):
     status_url: str
 
 
+# Logical field names for Amazon error columns (used by deduplicator)
+_AMAZON_ERROR_KEY_FIELDS: tuple[str, ...] = (
+    "error_code",
+    "error_message",
+    "affected_field",
+)
+
+# Recognised column name fragments for Amazon error detection (fallback heuristic)
+_ERROR_CODE_HINTS: tuple[str, ...] = ("código", "code", "error_code")
+_ERROR_CAT_HINTS: tuple[str, ...] = ("categoría", "category", "error_category")
+_ERROR_MSG_HINTS: tuple[str, ...] = ("mensaje", "message", "error_message")
+_AFFECTED_FIELD_HINTS: tuple[str, ...] = ("campo", "affected", "affected_field")
+
+
 @router.post(
     "/{run_id}/process",
     status_code=202,
     response_model=ProcessResponse,
-    summary="Trigger reconciliation processing for a run (gate RNF-08)",
+    summary="Trigger reconciliation processing for a run (gate RNF-08 / CA-01 / CA-03)",
 )
-def trigger_process(  # noqa: C901
+def trigger_process(  # noqa: C901, PLR0912, PLR0915
     run_id: int,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],  # noqa: ARG001
     db: Annotated[Session, Depends(get_db)],
     staging_dir: Annotated[Path, Depends(get_staging_dir)],
 ) -> ProcessResponse:
-    """Gate check (RNF-08) and minimal ingestion for the M3 BDD CA-01 gate.
+    """Gate check (RNF-08) + deduplication pipeline (spec 2.6, T-4.2).
 
     Returns 409 if any of the 3 required files is missing its SKU mapping.
-    On success: reads all mapped SKU columns, normalises the values, inserts
-    ``run_items`` rows with ``sku_raw`` / ``sku_norm`` for CA-01 scenario 3
-    verification, and returns 202.
 
-    NOTE: Full 3-way reconciliation pipeline (M4 — T-4.1..T-4.6) will extend
-    this stub with deduplication, cross-join, error classification, and async
-    execution.  The gate logic (409 on incomplete mapping) and the 202 contract
-    do NOT change between M3 and M4 (ADR-002).
+    On success (202):
+      1.  Loads all 3 source DataFrames using confirmed column mappings.
+      2.  Applies per-role deduplication policy (spec 2.6).
+      3.  Persists ``duplicate_findings`` records for every resolved group.
+      4.  Upserts ``run_items`` with proper flags and stock data.
+      5.  Inserts ``item_errors`` for Amazon report error rows (respects
+          the 1:N cardinality — different errors for same SKU are NOT dupes).
+      6.  Auto-inserts unknown Amazon error codes into ``error_codes`` with
+          family ``SIN_CLASIFICAR`` (T-4.4 pattern, EB-10).
+
+    NOTE: Full 3-way cross-join (T-4.3) and async execution (T-4.6) extend
+    this inline implementation in subsequent milestones.  The gate logic
+    (409 contract) and the 202 response do NOT change (ADR-002).
     """
     run = db.get(ReconciliationRun, run_id)
     if run is None:
@@ -577,7 +605,7 @@ def trigger_process(  # noqa: C901
             ),
         )
 
-    # Validate SKU mapping confirmed for every file (RNF-08 gate)
+    # ── Gate: SKU mapping must be confirmed for every file (RNF-08) ─────────
     for role, source_file in file_by_role.items():
         sku_mapping = (
             db.query(ColumnMapping)
@@ -596,24 +624,27 @@ def trigger_process(  # noqa: C901
                 ),
             )
 
-    # Gate passed — mark run as processing
+    # Gate passed — begin processing
     run.status = "processing"
     db.commit()
 
-    # Minimal ingestion: parse each file's mapped SKU column → insert run_items
-    seen_norms: set[str] = set()
+    # ── Phase 1: load DataFrames + resolve column names from mappings ────────
+    # run_items accumulator: sku_norm → merged data across all 3 files
+    run_item_data: dict[str, _RunItemAccum] = {}
+    # error rows per sku_norm (for amazon_report)
+    amazon_error_rows: list[dict[str, object]] = []
 
     for role, source_file in file_by_role.items():
-        sku_mapping = (
-            db.query(ColumnMapping)
-            .filter(
-                ColumnMapping.source_file_id == source_file.id,
-                ColumnMapping.logical_field == "sku",
-            )
-            .first()
-        )
-        if sku_mapping is None:  # already validated above — defensive guard
-            continue
+        all_mappings: dict[str, ColumnMapping] = {
+            cm.logical_field: cm
+            for cm in db.query(ColumnMapping)
+            .filter(ColumnMapping.source_file_id == source_file.id)
+            .all()
+        }
+
+        sku_mapping = all_mappings.get("sku")
+        if sku_mapping is None:
+            continue  # defensive — already validated above
 
         ext = Path(source_file.original_filename).suffix.lower()
         staging_path = staging_dir / f"{source_file.id}{ext}"
@@ -621,48 +652,363 @@ def trigger_process(  # noqa: C901
             continue
 
         df = _load_dataframe(source_file, staging_path)
-        col_idx = sku_mapping.source_column_index
-        if col_idx >= len(df.columns):
+        if sku_mapping.source_column_index >= len(df.columns):
             continue
 
-        col_name = str(df.columns[col_idx])
-        in_occ: int = 1 if role == "occ_top" else 0
-        in_feed: int = 1 if role == "wm_feed" else 0
-        in_amazon: int = 1 if role == "amazon_report" else 0
+        sku_col = str(df.columns[sku_mapping.source_column_index])
 
-        for raw_val in df[col_name].tolist():
-            raw_str = str(raw_val) if raw_val is not None else ""
-            norm_result = normalise_sku(raw_str)
-            if not norm_result.is_valid or norm_result.value is None:
-                continue
-            sku_norm = norm_result.value
-            if sku_norm in seen_norms:
-                continue
-            seen_norms.add(sku_norm)
-
-            db.execute(
-                sa_text("""
-                    INSERT OR IGNORE INTO run_items
-                        (run_id, sku_norm, sku_raw, in_occ, in_feed, in_amazon_report,
-                         sync_status, stock_conflict)
-                    VALUES
-                        (:run_id, :sku_norm, :sku_raw, :in_occ, :in_feed, :in_amazon,
-                         'NOT_SENT', 0)
-                """),
-                {
-                    "run_id": run_id,
-                    "sku_norm": sku_norm,
-                    "sku_raw": raw_str,
-                    "in_occ": in_occ,
-                    "in_feed": in_feed,
-                    "in_amazon": in_amazon,
-                },
+        # ── Deduplication per role (spec 2.6) ────────────────────────────────
+        if role == "occ_top":
+            dedup_result = deduplicate_occ(df, sku_col)
+            stock_mapping = all_mappings.get("stock")
+            stock_col_name = (
+                str(df.columns[stock_mapping.source_column_index])
+                if stock_mapping and stock_mapping.source_column_index < len(df.columns)
+                else None
             )
+            _persist_findings(db, source_file.id, dedup_result.findings)
+            for _, row in dedup_result.dataframe.iterrows():
+                raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
+                norm = normalise_sku(raw_str)
+                if not norm.is_valid or norm.value is None:
+                    continue
+                sku_n = norm.value
+                occ_stock: int | None = None
+                if stock_col_name and stock_col_name in row.index:
+                    occ_stock = _safe_int(row[stock_col_name])
+                accum = run_item_data.setdefault(
+                    sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
+                )
+                accum.in_occ = True
+                if occ_stock is not None:
+                    accum.occ_stock = occ_stock
+                if not accum.sku_raw:
+                    accum.sku_raw = raw_str
+
+        elif role == "wm_feed":
+            stock_mapping = all_mappings.get("stock")
+            stock_col_name = (
+                str(df.columns[stock_mapping.source_column_index])
+                if stock_mapping and stock_mapping.source_column_index < len(df.columns)
+                else None
+            )
+            dedup_result = deduplicate_feed(df, sku_col, stock_col_name)
+            _persist_findings(db, source_file.id, dedup_result.findings)
+            for _, row in dedup_result.dataframe.iterrows():
+                raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
+                norm = normalise_sku(raw_str)
+                if not norm.is_valid or norm.value is None:
+                    continue
+                sku_n = norm.value
+                feed_stock: int | None = None
+                if stock_col_name and stock_col_name in row.index:
+                    feed_stock = _safe_int(row[stock_col_name])
+                accum = run_item_data.setdefault(
+                    sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
+                )
+                accum.in_feed = True
+                if feed_stock is not None:
+                    accum.feed_stock = feed_stock
+                if sku_n in dedup_result.stock_conflicts:
+                    accum.stock_conflict = True
+                if not accum.sku_raw:
+                    accum.sku_raw = raw_str
+
+        elif role == "amazon_report":
+            # Resolve error key columns — prefer confirmed mappings, then heuristic
+            error_col_names = _resolve_amazon_error_cols(df, all_mappings)
+            dedup_result = deduplicate_amazon_errors(
+                df, sku_col, error_col_names["error_key_cols"],
+            )
+            _persist_findings(db, source_file.id, dedup_result.findings)
+            for _, row in dedup_result.dataframe.iterrows():
+                raw_str = str(row[sku_col]) if row[sku_col] is not None else ""
+                norm = normalise_sku(raw_str)
+                if not norm.is_valid or norm.value is None:
+                    continue
+                sku_n = norm.value
+                accum = run_item_data.setdefault(
+                    sku_n, _RunItemAccum(sku_norm=sku_n, sku_raw=raw_str),
+                )
+                accum.in_amazon = True
+                if not accum.sku_raw:
+                    accum.sku_raw = raw_str
+                # Collect error row for item_errors insertion (T-4.2/T-4.4)
+                amazon_error_rows.append({
+                    "sku_norm": sku_n,
+                    "error_code": str(
+                        row.get(error_col_names["error_code_col"], "UNKNOWN") or "UNKNOWN",
+                    ),
+                    "error_category": str(
+                        row.get(error_col_names["error_category_col"], "ERROR") or "ERROR",
+                    ),
+                    "error_message": str(
+                        row.get(error_col_names["error_message_col"], "") or "",
+                    ),
+                    "affected_field": str(
+                        row.get(error_col_names["affected_field_col"], "") or "",
+                    ) or None,
+                })
+
+    db.flush()  # flush duplicate_findings before inserting run_items
+
+    # ── Phase 2: upsert run_items ────────────────────────────────────────────
+    for sku_n, accum in run_item_data.items():
+        db.execute(
+            sa_text("""
+                INSERT OR IGNORE INTO run_items
+                    (run_id, sku_norm, sku_raw, in_occ, in_feed, in_amazon_report,
+                     feed_stock, occ_stock, stock_conflict, sync_status)
+                VALUES
+                    (:run_id, :sku_norm, :sku_raw, :in_occ, :in_feed, :in_amazon,
+                     :feed_stock, :occ_stock, :stock_conflict, 'NOT_SENT')
+            """),
+            {
+                "run_id": run_id,
+                "sku_norm": sku_n,
+                "sku_raw": accum.sku_raw,
+                "in_occ": 1 if accum.in_occ else 0,
+                "in_feed": 1 if accum.in_feed else 0,
+                "in_amazon": 1 if accum.in_amazon else 0,
+                "feed_stock": accum.feed_stock,
+                "occ_stock": accum.occ_stock,
+                "stock_conflict": 1 if accum.stock_conflict else 0,
+            },
+        )
+        # Merge flags for cross-file SKUs (same sku_norm in multiple files)
+        db.execute(
+            sa_text("""
+                UPDATE run_items SET
+                    in_occ = in_occ OR :in_occ,
+                    in_feed = in_feed OR :in_feed,
+                    in_amazon_report = in_amazon_report OR :in_amazon,
+                    feed_stock = CASE WHEN :feed_stock IS NOT NULL
+                                      THEN :feed_stock ELSE feed_stock END,
+                    occ_stock = CASE WHEN :occ_stock IS NOT NULL
+                                     THEN :occ_stock ELSE occ_stock END,
+                    stock_conflict = stock_conflict OR :stock_conflict
+                WHERE run_id = :run_id AND sku_norm = :sku_norm
+            """),
+            {
+                "run_id": run_id,
+                "sku_norm": sku_n,
+                "in_occ": 1 if accum.in_occ else 0,
+                "in_feed": 1 if accum.in_feed else 0,
+                "in_amazon": 1 if accum.in_amazon else 0,
+                "feed_stock": accum.feed_stock,
+                "occ_stock": accum.occ_stock,
+                "stock_conflict": 1 if accum.stock_conflict else 0,
+            },
+        )
+
+    db.flush()
+
+    # ── Phase 3: insert item_errors for Amazon report rows ───────────────────
+    if amazon_error_rows:
+        _insert_item_errors(db, run_id, amazon_error_rows)
 
     run.status = "completed"
     db.commit()
 
     return ProcessResponse(status_url=f"/api/v1/runs/{run_id}/status")
+
+
+# ---------------------------------------------------------------------------
+# Processing helpers — T-4.2
+# ---------------------------------------------------------------------------
+
+
+class _RunItemAccum:
+    """Mutable accumulator for a single sku_norm across all 3 source files."""
+
+    __slots__ = (
+        "feed_stock",
+        "in_amazon",
+        "in_feed",
+        "in_occ",
+        "occ_stock",
+        "sku_norm",
+        "sku_raw",
+        "stock_conflict",
+    )
+
+    def __init__(self, sku_norm: str, sku_raw: str) -> None:
+        """Initialise all flags to False / None."""
+        self.sku_norm = sku_norm
+        self.sku_raw = sku_raw
+        self.in_occ: bool = False
+        self.in_feed: bool = False
+        self.in_amazon: bool = False
+        self.feed_stock: int | None = None
+        self.occ_stock: int | None = None
+        self.stock_conflict: bool = False
+
+
+def _persist_findings(
+    db: Session,
+    source_file_id: int,
+    findings: list[DuplicateFindingData],
+) -> None:
+    """Insert duplicate_findings rows for every finding in the list.
+
+    Uses raw SQL so it works on both SQLite (tests) and MySQL (production).
+    The INSERT OR IGNORE prevents double-inserts if the pipeline is called
+    twice for the same run (defensive idempotency).
+    """
+    for fd in findings:
+        import json  # noqa: PLC0415
+        db.execute(
+            sa_text("""
+                INSERT OR IGNORE INTO duplicate_findings
+                    (source_file_id, sku_norm, occurrences, resolution, discarded_values)
+                VALUES
+                    (:source_file_id, :sku_norm, :occurrences, :resolution,
+                     :discarded_values)
+            """),
+            {
+                "source_file_id": source_file_id,
+                "sku_norm": fd.sku_norm,
+                "occurrences": fd.occurrences,
+                "resolution": fd.resolution,
+                "discarded_values": json.dumps(fd.discarded_values),
+            },
+        )
+
+
+def _safe_int(value: object) -> int | None:
+    """Parse a cell value to int, returning None for non-numeric input."""
+    if value is None:
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except (ValueError, TypeError):
+        return None
+
+
+def _resolve_amazon_error_cols(
+    df: pd.DataFrame,
+    all_mappings: dict[str, ColumnMapping],
+) -> dict[str, str | None]:
+    """Return column names for Amazon error fields.
+
+    Prefers confirmed ``column_mappings``.  Falls back to heuristic name
+    matching against the DataFrame columns.
+    """
+
+    def _col_name_from_mapping(field: str) -> str | None:
+        m = all_mappings.get(field)
+        if m and m.source_column_index < len(df.columns):
+            return str(df.columns[m.source_column_index])
+        return None
+
+    def _heuristic(hints: tuple[str, ...]) -> str | None:
+        for col in df.columns:
+            col_l = str(col).lower()
+            if any(h in col_l for h in hints):
+                return str(col)
+        return None
+
+    error_code_col = _col_name_from_mapping("error_code") or _heuristic(
+        _ERROR_CODE_HINTS,
+    )
+    error_cat_col = _col_name_from_mapping("error_category") or _heuristic(
+        _ERROR_CAT_HINTS,
+    )
+    error_msg_col = _col_name_from_mapping("error_message") or _heuristic(
+        _ERROR_MSG_HINTS,
+    )
+    affected_col = _col_name_from_mapping("affected_field") or _heuristic(
+        _AFFECTED_FIELD_HINTS,
+    )
+
+    error_key_cols = [c for c in [error_code_col, error_msg_col, affected_col] if c]
+
+    return {
+        "error_code_col": error_code_col,
+        "error_category_col": error_cat_col,
+        "error_message_col": error_msg_col,
+        "affected_field_col": affected_col,
+        "error_key_cols": error_key_cols,  # type: ignore[dict-item]
+    }
+
+
+def _insert_item_errors(
+    db: Session,
+    run_id: int,
+    error_rows: list[dict[str, object]],
+) -> None:
+    """Insert item_errors for Amazon report error rows (T-4.2 / partial T-4.4).
+
+    Auto-inserts unknown error codes into ``error_codes`` with
+    ``family_code = 'SIN_CLASIFICAR'`` (EB-10, RF-14).
+
+    The ``error_category`` is normalised to ``ERROR`` / ``ADVERTENCIA``.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    known_codes: set[str] = set()
+
+    for row in error_rows:
+        error_code = str(row["error_code"] or "UNKNOWN")
+        error_category = _normalise_error_category(str(row["error_category"] or "ERROR"))
+        error_message = str(row["error_message"] or "")
+        affected_field = row.get("affected_field")
+        sku_norm = str(row["sku_norm"])
+
+        # Auto-insert unknown error code (EB-10) — defensive, ignore if exists
+        if error_code not in known_codes:
+            db.execute(
+                sa_text("""
+                    INSERT OR IGNORE INTO error_codes
+                        (code, family_code, first_seen_at)
+                    VALUES
+                        (:code, 'SIN_CLASIFICAR', :first_seen_at)
+                """),
+                {
+                    "code": error_code,
+                    "first_seen_at": datetime.now(tz=UTC).isoformat(),
+                },
+            )
+            known_codes.add(error_code)
+
+        # Lookup run_item_id for this sku_norm
+        run_item_row = db.execute(
+            sa_text(
+                "SELECT id FROM run_items WHERE run_id = :run_id AND sku_norm = :sku_norm",
+            ),
+            {"run_id": run_id, "sku_norm": sku_norm},
+        ).fetchone()
+
+        if run_item_row is None:
+            continue
+
+        run_item_id = run_item_row[0]
+
+        db.execute(
+            sa_text("""
+                INSERT INTO item_errors
+                    (run_item_id, error_code, error_category, error_message,
+                     affected_field)
+                VALUES
+                    (:run_item_id, :error_code, :error_category, :error_message,
+                     :affected_field)
+            """),
+            {
+                "run_item_id": run_item_id,
+                "error_code": error_code,
+                "error_category": error_category,
+                "error_message": error_message,
+                "affected_field": affected_field or None,
+            },
+        )
+
+
+def _normalise_error_category(raw: str) -> str:
+    """Normalise an error category to ``ERROR`` or ``ADVERTENCIA``."""
+    up = raw.strip().upper()
+    if "ADVERTENCIA" in up or "WARNING" in up or "WARN" in up:
+        return "ADVERTENCIA"
+    return "ERROR"
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 # 4. Desglose de Tareas (Tasks) — Módulo 1: Conciliador de Errores de Publicación Marketplace
 
 > **Fase SDD:** `4/4 — Task Breakdown`
-> **Estado:** `🔵 En ejecución — Hito M3 cerrado (2026-06-15)`
-> **Versión:** `1.1.0`
-> **Última actualización:** 2026-06-15
+> **Estado:** `🔵 En ejecución — Hito M4 en progreso (T-4.4 y T-4.5 completados 2026-06-16)`
+> **Versión:** `1.2.0`
+> **Última actualización:** 2026-06-16
 > **Trazabilidad:** ejecuta [`3_plan.md`](./3_plan.md) v1.0.0 (🟢 Aprobado), verifica contra [`2_spec.md`](./2_spec.md) v1.1.0 (🟢 Aprobado)
 > **Rol de autoría:** Technical Lead / Scrum Master
 > **Uso previsto:** backlog para sesiones cortas de programación asistida por agente. Cada tarea está dimensionada para completarse (con sus tests) en una sesión. **Las tareas se ejecutan en orden estricto dentro de cada hito**; las dependencias entre hitos están explícitas.
@@ -92,11 +92,11 @@ Dependencias entre hitos: M1 → M2 → M3 → M4 → M5 → M6 (estrictamente s
 
 | ID | Tarea | Traza a | Dep. | Est. | DoD específico |
 |---|---|---|---|---|---|
-| T-4.1 | Puerto **`TaskRunner`** + adaptador BackgroundTasks/ThreadPool: semáforo (máx. 2), estado de fases en MySQL, recuperación al arranque (`processing` → `failed: restart_during_processing`) | ADR-002, RF-06 | M3 | M | Tests: el event loop responde `/health` durante un job pesado simulado; 3er job concurrente espera; reinicio simulado marca la run como `failed` con causa |
+| T-4.1 | ✅ | Puerto **`TaskRunner`** + adaptador BackgroundTasks/ThreadPool: semáforo (máx. 2), estado de fases en MySQL, recuperación al arranque (`processing` → `failed: restart_during_processing`) | ADR-002, RF-06 | M3 | M | Tests: el event loop responde `/health` durante un job pesado simulado; 3er job concurrente espera; reinicio simulado marca la run como `failed` con causa |
 | T-4.2 | ✅ | Etapa **Deduplicación** según política spec 2.6: idénticas→colapso, Libro1→primera, feed→`MAX(stock)`+`stock_conflict`, errores 1:N exentos; persistencia en `duplicate_findings` | spec 2.6, RF-05, OBJ-08 | T-4.1 | M | **BDD CA-03 verde** (4 escenarios, incluido "nunca se suma" y "1:N no es duplicado") |
-| T-4.3 | Etapa **Cruce de 3 vías**: outer-join sobre `sku_norm`, asignación de `sync_status` (5 estados spec 2.7), flags `in_occ/in_feed/in_amazon_report`, stocks con signo | spec 2.7, RF-06, OBJ-07 | T-4.2 | M | **BDD CA-02 verde** (escenario parametrizado de clasificación + cruce insensible a suciedad NBSP/case); cruce de los fixtures reproduce los números medidos: 524 enviados, 708 `NOT_SENT`, 62 `DESYNC_FEED_ONLY` |
-| T-4.4 | Etapa **Errores y familias**: join 1:N de errores por SKU, clasificación por `error_codes.family_code`, **alta automática de códigos desconocidos en `SIN_CLASIFICAR`** con `first_seen_at` | spec 2.8, RF-07, RF-14, EB-10 | T-4.3 | M | Tests: `S01098S3MRN` conserva 11 errores; código `99999` inyectado → alta en catálogo + familia `SIN_CLASIFICAR`; NBSP normalizado en mensajes |
-| T-4.5 | Etapa **Persistencia por lotes** transaccional (`run_items` + `item_errors`) + `summary_metrics` JSON + transición `completed` | RF-10, plan 3.4 | T-4.4 | M | Test: fallo a mitad de escritura → rollback completo, run `failed`, sin filas huérfanas; run completa de fixtures persiste 4.094+ items en < 30 s (pre-validación RNF-02) |
+| T-4.3 | ✅ | Etapa **Cruce de 3 vías**: outer-join sobre `sku_norm`, asignación de `sync_status` (5 estados spec 2.7), flags `in_occ/in_feed/in_amazon_report`, stocks con signo | spec 2.7, RF-06, OBJ-07 | T-4.2 | M | **BDD CA-02 verde** (escenario parametrizado de clasificación + cruce insensible a suciedad NBSP/case); cruce de los fixtures reproduce los números medidos: 524 enviados, 708 `NOT_SENT`, 62 `DESYNC_FEED_ONLY` |
+| T-4.4 | ✅ | Etapa **Errores y familias**: join 1:N de errores por SKU, clasificación por `error_codes.family_code`, **alta automática de códigos desconocidos en `SIN_CLASIFICAR`** con `first_seen_at` | spec 2.8, RF-07, RF-14, EB-10 | T-4.3 | M | Tests: `S01098S3MRN` conserva 11 errores; código `99999` inyectado → alta en catálogo + familia `SIN_CLASIFICAR`; NBSP normalizado en mensajes |
+| T-4.5 | ✅ | Etapa **Persistencia por lotes** transaccional (`run_items` + `item_errors`) + `summary_metrics` JSON + transición `completed` | RF-10, plan 3.4 | T-4.4 | M | Test: fallo a mitad de escritura → rollback completo, run `failed`, sin filas huérfanas; run completa de fixtures persiste 4.094+ items en < 30 s (pre-validación RNF-02) |
 | T-4.6 | Endpoints `POST /runs/{id}/process` (202 / 409 por gate) y `GET /runs/{id}/status` (fase, progreso, conteos) + frontend paso 5 (pantalla de progreso con polling) | RF-06, plan 3.5/3.7 | T-4.5, T-3.9 | M | Test de integración del flujo 202→polling→completed; E2E: barra de progreso refleja las fases del pipeline 3.4 |
 
 ### M5 — Informe, Exportación e Histórico (gate: CA-05 verde)

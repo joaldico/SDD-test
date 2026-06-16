@@ -50,6 +50,8 @@ from marketplace_conciliator.platform.db.models.runs import (
 )
 from marketplace_conciliator.platform.db.session import get_db
 from marketplace_conciliator.platform.deps import CurrentUser, get_current_user
+from marketplace_conciliator.reconciliation.error_classifier import ErrorRow
+from marketplace_conciliator.reconciliation.persistence import RunItemData, persist_run_results
 from marketplace_conciliator.settings import get_settings
 
 router = APIRouter(prefix="/runs", tags=["ingestion"])
@@ -718,7 +720,7 @@ def trigger_process(  # noqa: C901, PLR0912, PLR0915
             # Resolve error key columns — prefer confirmed mappings, then heuristic
             error_col_names = _resolve_amazon_error_cols(df, all_mappings)
             dedup_result = deduplicate_amazon_errors(
-                df, sku_col, error_col_names["error_key_cols"],
+                df, sku_col, error_col_names.error_key_cols,
             )
             _persist_findings(db, source_file.id, dedup_result.findings)
             for _, row in dedup_result.dataframe.iterrows():
@@ -733,84 +735,201 @@ def trigger_process(  # noqa: C901, PLR0912, PLR0915
                 accum.in_amazon = True
                 if not accum.sku_raw:
                     accum.sku_raw = raw_str
-                # Collect error row for item_errors insertion (T-4.2/T-4.4)
+                # Collect error row for item_errors insertion (T-4.2/T-4.4).
+                # Skip rows with an empty error_code: the SKU is still counted as
+                # in_amazon_report (= sent to Amazon) but has no error — SENT_OK.
+                raw_error_code = str(
+                    row.get(error_col_names.error_code_col, "") or "",
+                ).strip()
+                if not raw_error_code:
+                    continue
                 amazon_error_rows.append({
                     "sku_norm": sku_n,
-                    "error_code": str(
-                        row.get(error_col_names["error_code_col"], "UNKNOWN") or "UNKNOWN",
-                    ),
+                    "error_code": raw_error_code,
                     "error_category": str(
-                        row.get(error_col_names["error_category_col"], "ERROR") or "ERROR",
+                        row.get(error_col_names.error_category_col, "ERROR") or "ERROR",
                     ),
                     "error_message": str(
-                        row.get(error_col_names["error_message_col"], "") or "",
+                        row.get(error_col_names.error_message_col, "") or "",
                     ),
                     "affected_field": str(
-                        row.get(error_col_names["affected_field_col"], "") or "",
+                        row.get(error_col_names.affected_field_col, "") or "",
                     ) or None,
                 })
 
-    db.flush()  # flush duplicate_findings before inserting run_items
+    db.flush()  # flush duplicate_findings before building run items
 
-    # ── Phase 2: upsert run_items ────────────────────────────────────────────
+    # ── Phase 2: 3-way cross-join + sync_status assignment (T-4.3, spec 2.7) ─
+    # Precompute which SKUs have at least one error in the Amazon report.
+    # SKUs in the error block but with an empty error_code were already excluded
+    # from amazon_error_rows, so they correctly resolve to SENT_OK (has_errors=False).
+    skus_with_errors: set[str] = {str(row["sku_norm"]) for row in amazon_error_rows}
+
+    # Build error_rows grouped by sku_norm for the persistence layer
+    errors_by_sku: dict[str, list[ErrorRow]] = {}
+    for err_dict in amazon_error_rows:
+        sku_n = str(err_dict["sku_norm"])
+        errors_by_sku.setdefault(sku_n, []).append(
+            ErrorRow(
+                sku_norm=sku_n,
+                error_code=str(err_dict["error_code"] or "UNKNOWN"),
+                error_category=str(err_dict["error_category"] or "ERROR"),
+                error_message=str(err_dict["error_message"] or ""),
+                affected_field=str(err_dict["affected_field"]) if err_dict.get("affected_field") else None,
+            ),
+        )
+
+    # Build RunItemData list from the accumulator
+    run_items_data: list[RunItemData] = []
     for sku_n, accum in run_item_data.items():
-        db.execute(
-            sa_text("""
-                INSERT OR IGNORE INTO run_items
-                    (run_id, sku_norm, sku_raw, in_occ, in_feed, in_amazon_report,
-                     feed_stock, occ_stock, stock_conflict, sync_status)
-                VALUES
-                    (:run_id, :sku_norm, :sku_raw, :in_occ, :in_feed, :in_amazon,
-                     :feed_stock, :occ_stock, :stock_conflict, 'NOT_SENT')
-            """),
-            {
-                "run_id": run_id,
-                "sku_norm": sku_n,
-                "sku_raw": accum.sku_raw,
-                "in_occ": 1 if accum.in_occ else 0,
-                "in_feed": 1 if accum.in_feed else 0,
-                "in_amazon": 1 if accum.in_amazon else 0,
-                "feed_stock": accum.feed_stock,
-                "occ_stock": accum.occ_stock,
-                "stock_conflict": 1 if accum.stock_conflict else 0,
-            },
+        sync_status = _compute_sync_status(
+            _in_occ=accum.in_occ,
+            in_feed=accum.in_feed,
+            in_amazon=accum.in_amazon,
+            has_errors=sku_n in skus_with_errors,
         )
-        # Merge flags for cross-file SKUs (same sku_norm in multiple files)
-        db.execute(
-            sa_text("""
-                UPDATE run_items SET
-                    in_occ = in_occ OR :in_occ,
-                    in_feed = in_feed OR :in_feed,
-                    in_amazon_report = in_amazon_report OR :in_amazon,
-                    feed_stock = CASE WHEN :feed_stock IS NOT NULL
-                                      THEN :feed_stock ELSE feed_stock END,
-                    occ_stock = CASE WHEN :occ_stock IS NOT NULL
-                                     THEN :occ_stock ELSE occ_stock END,
-                    stock_conflict = stock_conflict OR :stock_conflict
-                WHERE run_id = :run_id AND sku_norm = :sku_norm
-            """),
-            {
-                "run_id": run_id,
-                "sku_norm": sku_n,
-                "in_occ": 1 if accum.in_occ else 0,
-                "in_feed": 1 if accum.in_feed else 0,
-                "in_amazon": 1 if accum.in_amazon else 0,
-                "feed_stock": accum.feed_stock,
-                "occ_stock": accum.occ_stock,
-                "stock_conflict": 1 if accum.stock_conflict else 0,
-            },
+        run_items_data.append(
+            RunItemData(
+                sku_norm=sku_n,
+                sku_raw=accum.sku_raw,
+                in_occ=accum.in_occ,
+                in_feed=accum.in_feed,
+                in_amazon_report=accum.in_amazon,
+                sync_status=sync_status,
+                feed_stock=accum.feed_stock,
+                occ_stock=accum.occ_stock,
+                stock_conflict=accum.stock_conflict,
+                error_rows=errors_by_sku.get(sku_n, []),
+            ),
         )
 
-    db.flush()
-
-    # ── Phase 3: insert item_errors for Amazon report rows ───────────────────
-    if amazon_error_rows:
-        _insert_item_errors(db, run_id, amazon_error_rows)
-
-    run.status = "completed"
-    db.commit()
+    # ── Phase 3: transactional batch persistence (T-4.5) ────────────────────
+    # persist_run_results handles run_items + item_errors atomically, computes
+    # summary_metrics, and transitions the run to 'completed'. On failure it
+    # rolls back the batch, marks the run 'failed', and re-raises.
+    persist_run_results(db, run_id, run_items_data)
 
     return ProcessResponse(status_url=f"/api/v1/runs/{run_id}/status")
+
+
+# ---------------------------------------------------------------------------
+# Endpoint — T-4.3: GET catalog-health (Vista 3 minimal, spec 2.7)
+# ---------------------------------------------------------------------------
+
+
+class CatalogHealthItem(BaseModel):
+    """One run_item row for the catalog-health view."""
+
+    sku_norm: str
+    sku_raw: str
+    sync_status: str
+    feed_stock: int | None
+    occ_stock: int | None
+    stock_conflict: bool
+    in_occ: bool
+    in_feed: bool
+    in_amazon_report: bool
+    stock_disponible: bool  # feed_stock > 0
+
+
+class CatalogHealthResponse(BaseModel):
+    """Response for GET /runs/{run_id}/catalog-health."""
+
+    run_id: int
+    items: list[CatalogHealthItem]
+    total: int
+
+
+@router.get(
+    "/{run_id}/catalog-health",
+    response_model=CatalogHealthResponse,
+    summary="Vista 3 — Salud de catálogo (spec 2.7, T-4.3)",
+)
+def catalog_health(
+    run_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    sync_status: Annotated[
+        str | None,
+        Query(description="Filter by sync_status (e.g. DESYNC_FEED_ONLY)"),
+    ] = None,
+) -> CatalogHealthResponse:
+    """Return run_items ordered by priority (sync_status) then feed_stock DESC.
+
+    Default ordering follows spec 2.7: highest-priority status first,
+    within each status ordered by feed_stock DESC (active stock loss first).
+    Optional ``sync_status`` query param filters to a single classification.
+    """
+    run = db.get(ReconciliationRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
+
+    query = sa_text("""
+        SELECT sku_norm, sku_raw, sync_status,
+               feed_stock, occ_stock, stock_conflict,
+               in_occ, in_feed, in_amazon_report
+        FROM run_items
+        WHERE run_id = :run_id
+          AND (:sync_status IS NULL OR sync_status = :sync_status)
+        ORDER BY
+            CASE sync_status
+                WHEN 'SENT_WITH_ERROR'    THEN 1
+                WHEN 'DESYNC_FEED_ONLY'   THEN 2
+                WHEN 'DESYNC_AMAZON_ONLY' THEN 3
+                WHEN 'NOT_SENT'           THEN 4
+                WHEN 'SENT_OK'            THEN 5
+                ELSE 9
+            END ASC,
+            COALESCE(feed_stock, 0) DESC
+    """)
+
+    rows = db.execute(query, {"run_id": run_id, "sync_status": sync_status}).fetchall()
+
+    items = [
+        CatalogHealthItem(
+            sku_norm=str(row[0]),
+            sku_raw=str(row[1]),
+            sync_status=str(row[2]),
+            feed_stock=row[3],
+            occ_stock=row[4],
+            stock_conflict=bool(row[5]),
+            in_occ=bool(row[6]),
+            in_feed=bool(row[7]),
+            in_amazon_report=bool(row[8]),
+            stock_disponible=(row[3] is not None and row[3] > 0),
+        )
+        for row in rows
+    ]
+
+    return CatalogHealthResponse(run_id=run_id, items=items, total=len(items))
+
+
+# ---------------------------------------------------------------------------
+# Processing helpers — T-4.3: 3-way cross-join + sync_status computation
+# ---------------------------------------------------------------------------
+
+
+def _compute_sync_status(
+    _in_occ: bool,  # noqa: FBT001  — kept for call-site clarity (spec 2.7 table)
+    in_feed: bool,  # noqa: FBT001
+    in_amazon: bool,  # noqa: FBT001
+    has_errors: bool,  # noqa: FBT001
+) -> str:
+    """Assign one of the 5 sync_status values per spec 2.7.
+
+    Priority matrix (∈ occ / ∈ feed / ∈ amazon):
+      feed ∧ amazon ∧ errors  → SENT_WITH_ERROR
+      feed ∧ amazon ∧ ¬errors → SENT_OK
+      feed ∧ ¬amazon          → DESYNC_FEED_ONLY
+      ¬feed ∧ amazon          → DESYNC_AMAZON_ONLY
+      occ ∧ ¬feed ∧ ¬amazon  → NOT_SENT  (fallback)
+    """
+    if in_feed and in_amazon:
+        return "SENT_WITH_ERROR" if has_errors else "SENT_OK"
+    if in_feed:
+        return "DESYNC_FEED_ONLY"
+    if in_amazon:
+        return "DESYNC_AMAZON_ONLY"
+    return "NOT_SENT"
 
 
 # ---------------------------------------------------------------------------
@@ -885,10 +1004,36 @@ def _safe_int(value: object) -> int | None:
         return None
 
 
+class _AmazonErrorCols:
+    """Column name resolution result for Amazon report error fields."""
+
+    __slots__ = (
+        "affected_field_col",
+        "error_category_col",
+        "error_code_col",
+        "error_key_cols",
+        "error_message_col",
+    )
+
+    def __init__(
+        self,
+        error_code_col: str | None,
+        error_category_col: str | None,
+        error_message_col: str | None,
+        affected_field_col: str | None,
+        error_key_cols: list[str],
+    ) -> None:
+        self.error_code_col = error_code_col
+        self.error_category_col = error_category_col
+        self.error_message_col = error_message_col
+        self.affected_field_col = affected_field_col
+        self.error_key_cols = error_key_cols
+
+
 def _resolve_amazon_error_cols(
     df: pd.DataFrame,
     all_mappings: dict[str, ColumnMapping],
-) -> dict[str, str | None]:
+) -> _AmazonErrorCols:
     """Return column names for Amazon error fields.
 
     Prefers confirmed ``column_mappings``.  Falls back to heuristic name
@@ -921,94 +1066,17 @@ def _resolve_amazon_error_cols(
         _AFFECTED_FIELD_HINTS,
     )
 
-    error_key_cols = [c for c in [error_code_col, error_msg_col, affected_col] if c]
+    error_key_cols: list[str] = [
+        c for c in [error_code_col, error_msg_col, affected_col] if c
+    ]
 
-    return {
-        "error_code_col": error_code_col,
-        "error_category_col": error_cat_col,
-        "error_message_col": error_msg_col,
-        "affected_field_col": affected_col,
-        "error_key_cols": error_key_cols,  # type: ignore[dict-item]
-    }
-
-
-def _insert_item_errors(
-    db: Session,
-    run_id: int,
-    error_rows: list[dict[str, object]],
-) -> None:
-    """Insert item_errors for Amazon report error rows (T-4.2 / partial T-4.4).
-
-    Auto-inserts unknown error codes into ``error_codes`` with
-    ``family_code = 'SIN_CLASIFICAR'`` (EB-10, RF-14).
-
-    The ``error_category`` is normalised to ``ERROR`` / ``ADVERTENCIA``.
-    """
-    from datetime import UTC, datetime  # noqa: PLC0415
-
-    known_codes: set[str] = set()
-
-    for row in error_rows:
-        error_code = str(row["error_code"] or "UNKNOWN")
-        error_category = _normalise_error_category(str(row["error_category"] or "ERROR"))
-        error_message = str(row["error_message"] or "")
-        affected_field = row.get("affected_field")
-        sku_norm = str(row["sku_norm"])
-
-        # Auto-insert unknown error code (EB-10) — defensive, ignore if exists
-        if error_code not in known_codes:
-            db.execute(
-                sa_text("""
-                    INSERT OR IGNORE INTO error_codes
-                        (code, family_code, first_seen_at)
-                    VALUES
-                        (:code, 'SIN_CLASIFICAR', :first_seen_at)
-                """),
-                {
-                    "code": error_code,
-                    "first_seen_at": datetime.now(tz=UTC).isoformat(),
-                },
-            )
-            known_codes.add(error_code)
-
-        # Lookup run_item_id for this sku_norm
-        run_item_row = db.execute(
-            sa_text(
-                "SELECT id FROM run_items WHERE run_id = :run_id AND sku_norm = :sku_norm",
-            ),
-            {"run_id": run_id, "sku_norm": sku_norm},
-        ).fetchone()
-
-        if run_item_row is None:
-            continue
-
-        run_item_id = run_item_row[0]
-
-        db.execute(
-            sa_text("""
-                INSERT INTO item_errors
-                    (run_item_id, error_code, error_category, error_message,
-                     affected_field)
-                VALUES
-                    (:run_item_id, :error_code, :error_category, :error_message,
-                     :affected_field)
-            """),
-            {
-                "run_item_id": run_item_id,
-                "error_code": error_code,
-                "error_category": error_category,
-                "error_message": error_message,
-                "affected_field": affected_field or None,
-            },
-        )
-
-
-def _normalise_error_category(raw: str) -> str:
-    """Normalise an error category to ``ERROR`` or ``ADVERTENCIA``."""
-    up = raw.strip().upper()
-    if "ADVERTENCIA" in up or "WARNING" in up or "WARN" in up:
-        return "ADVERTENCIA"
-    return "ERROR"
+    return _AmazonErrorCols(
+        error_code_col=error_code_col,
+        error_category_col=error_cat_col,
+        error_message_col=error_msg_col,
+        affected_field_col=affected_col,
+        error_key_cols=error_key_cols,
+    )
 
 
 # ---------------------------------------------------------------------------
